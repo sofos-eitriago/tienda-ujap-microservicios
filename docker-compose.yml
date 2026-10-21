@@ -1,19 +1,24 @@
 # Proyecto Final LPR07304 — Tienda en línea con microservicios
 #
-# PARTE 1 DE 6 — Infraestructura base: bases de datos (PostgreSQL y MongoDB) y API Gateway (Nginx).
-# Los microservicios y el frontend se agregan a este archivo en las partes siguientes.
+# PARTE 2 DE 6 — Infraestructura base + servicio de usuarios y autenticación.
+# Los demás microservicios y el frontend se agregan a este archivo en las partes siguientes.
 #
-# Levantar la parte 1:
+# Levantar lo publicado hasta ahora:
 #   docker compose up -d --build
 #
 # Las variables ${...} se leen del archivo .env (si no existe, se usan los valores por defecto).
-# Solo el gateway publica un puerto: las bases de datos no son accesibles desde fuera de Docker.
+# Solo el gateway publica un puerto: los microservicios y las bases de datos no son accesibles
+# desde fuera de Docker.
 
 name: tienda-ujap
 
+# Configuración común a los microservicios
+x-jwt: &jwt
+  JWT_SECRET: ${JWT_SECRET:-secreto-de-desarrollo-cambiar-en-produccion-2026}
+
 services:
   # ─────────────────────────── Bases de datos ───────────────────────────
-  postgres:                         # SQL — la usarán servicio-usuarios y servicio-pedidos
+  postgres:                         # SQL — la usan servicio-usuarios y (parte 5) servicio-pedidos
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${DB_USER:-admin}
@@ -45,10 +50,38 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # ──────────────── Microservicios con PostgreSQL (SQL) ────────────────
+  servicio-usuarios:                # Python + FastAPI + SQLAlchemy — usuarios y login (emite los JWT)
+    build: ./servicio-usuarios
+    environment:
+      <<: *jwt
+      JWT_EXPIRA_MIN: ${JWT_EXPIRA_MIN:-60}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@tienda.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin2026!}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-admin}
+      DB_PASS: ${DB_PASS:-admin123}
+      DB_NAME: ${DB_NAME:-tienda}
+      ACTIVIDAD_URL: http://servicio-actividad:8080   # servicio de la parte 4; mientras no exista solo se registra un aviso
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend, frontend]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
   # ───────────────────────────── API Gateway ─────────────────────────────
   gateway:                          # Nginx: único punto de entrada al sistema
     build: ./gateway
     ports: ["${GATEWAY_PORT:-80}:80"]
+    depends_on:
+      - servicio-usuarios
     networks: [frontend]
     restart: unless-stopped
 

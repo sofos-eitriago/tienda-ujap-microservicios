@@ -2,7 +2,7 @@
 
 Proyecto Final · **LPR07304 Lenguajes de Programación** · Universidad José Antonio Páez
 
-> **Estado del repositorio: parte 1 de 6.** Aquí está la base de la arquitectura: la infraestructura y las bases de datos. Las demás partes se publicarán en el orden de la tabla de más abajo.
+> **Estado del repositorio: parte 2 de 6.** Están publicadas la infraestructura base y el servicio de usuarios y autenticación. Las demás partes se publicarán en el orden de la tabla de más abajo.
 
 ## ¿Qué hace el sistema?
 
@@ -53,26 +53,38 @@ El repositorio se publica por partes, ordenadas según sus dependencias: el serv
 
 | # | Parte | Contenido | Estado |
 |:-:|---|---|:-:|
-| 1 | **Infraestructura base** | `docker-compose.yml` con PostgreSQL y MongoDB, API Gateway (Nginx), variables de entorno y nombre local `tienda.ujap.test` | ✅ Publicada |
-| 2 | Servicio de usuarios y autenticación | `servicio-usuarios/` — Python · FastAPI · PostgreSQL | ⏳ Pendiente |
+| 1 | Infraestructura base | `docker-compose.yml` con PostgreSQL y MongoDB, API Gateway (Nginx), variables de entorno y nombre local `tienda.ujap.test` | ✅ Publicada |
+| 2 | **Servicio de usuarios y autenticación** | `servicio-usuarios/` — Python · FastAPI · PostgreSQL: registro, login, roles y tokens JWT | ✅ Publicada |
 | 3 | Servicio de productos | `servicio-productos/` — Node.js · Express · MongoDB | ⏳ Pendiente |
 | 4 | Servicio de actividad | `servicio-actividad/` — Go · MongoDB | ⏳ Pendiente |
 | 5 | Servicio de pedidos | `servicio-pedidos/` — Java · Spring Boot · PostgreSQL | ⏳ Pendiente |
 | 6 | Frontend, pruebas y documentación | `frontend/`, `tests/`, capturas de pantalla y README completo | ⏳ Pendiente |
 
-## Contenido de la parte 1
+## Contenido publicado
 
 ```
 .
-├── docker-compose.yml        ← PostgreSQL, MongoDB y API Gateway
+├── docker-compose.yml        ← PostgreSQL, MongoDB, servicio de usuarios y API Gateway
 ├── .env.example              ← plantilla de variables de entorno
 ├── .gitignore
 ├── .gitattributes
 ├── configurar-dominio.ps1    ← agrega tienda.ujap.test al archivo hosts (Windows)
-└── gateway/
+├── gateway/
+│   ├── Dockerfile
+│   └── nginx.conf            ← rutas hacia cada microservicio
+└── servicio-usuarios/        ← parte 2
     ├── Dockerfile
-    └── nginx.conf            ← rutas hacia cada microservicio
+    ├── requirements.txt
+    └── app/
+        ├── main.py           ← rutas de autenticación y de usuarios
+        ├── seguridad.py      ← bcrypt, tokens JWT y permisos por rol
+        ├── models.py         ← tabla `usuarios` (SQLAlchemy)
+        ├── schemas.py        ← validación de datos (Pydantic)
+        ├── database.py       ← conexión a PostgreSQL
+        └── actividad.py      ← envío de eventos al servicio de actividad
 ```
+
+## Parte 1 — Infraestructura base
 
 ### Bases de datos
 
@@ -100,7 +112,57 @@ Los endpoints que solo deben usarse entre microservicios (`/api/productos/{id}/r
 
 El gateway resuelve los nombres de los servicios en cada petición, así que arranca aunque alguno todavía no esté disponible.
 
-## Cómo probar la parte 1
+## Parte 2 — Servicio de usuarios y autenticación
+
+Microservicio en **Python 3.12 + FastAPI + SQLAlchemy 2** que guarda los usuarios en **PostgreSQL**. Cumple dos funciones: administrar usuarios y **autenticar** (inicio de sesión y emisión de tokens).
+
+- Las contraseñas se guardan cifradas con **bcrypt**; nunca en texto plano. Un email inexistente y una contraseña incorrecta devuelven el mismo mensaje.
+- Al iniciar sesión se emite un **token JWT** (HS256) que expira a los `JWT_EXPIRA_MIN` minutos (60 por defecto). Los demás microservicios (partes 3 a 5) verificarán ese token con el mismo `JWT_SECRET`, sin consultar a este servicio en cada petición.
+- Hay dos roles: **cliente** y **administrador**. Quien crea su propia cuenta siempre queda como cliente.
+- La tabla `usuarios` la crea el propio servicio al arrancar, con reintentos hasta que PostgreSQL esté listo.
+- Cada acción importante (inicio de sesión, registro, alta, cambio y baja de usuarios) se envía como evento al servicio de actividad (parte 4). Mientras esa parte no exista, el servicio deja un aviso en el log y sigue funcionando.
+
+### Permisos
+
+| Acción | Sin sesión | Cliente | Administrador |
+|---|:-:|:-:|:-:|
+| Crear cuenta e iniciar sesión | ✅ | | |
+| Ver y editar sus propios datos | | ✅ | ✅ |
+| Ver a cualquier usuario, listar, crear y eliminar usuarios | | | ✅ |
+| Cambiar el rol de un usuario | | | ✅ |
+
+### Endpoints
+
+Las rutas marcadas con 🔒 requieren `Authorization: Bearer <token>`. Los errores siempre tienen el formato `{"detail": "mensaje"}`.
+
+| Método | Ruta | Quién | Descripción |
+|---|---|---|---|
+| POST | `/api/auth/registro` | público | Crear cuenta de cliente → devuelve el token |
+| POST | `/api/auth/login` | público | `{email, password}` → `{access_token, usuario}` |
+| GET | `/api/auth/yo` | 🔒 | Datos del usuario del token |
+| GET | `/api/usuarios` | 🔒 admin | Listar usuarios |
+| GET | `/api/usuarios/{id}` | 🔒 admin o el propio usuario | Obtener un usuario |
+| POST | `/api/usuarios` | 🔒 admin | Crear usuario (con rol) |
+| PUT | `/api/usuarios/{id}` | 🔒 admin o el propio usuario | Actualizar (solo el admin cambia roles) |
+| DELETE | `/api/usuarios/{id}` | 🔒 admin | Eliminar (no puede eliminarse a sí mismo) |
+| GET | `/health` | público | Estado del servicio (el gateway lo publica como `/estado/usuarios`) |
+
+La contraseña debe tener entre 8 y 72 caracteres. Un email repetido responde `409` y los datos inválidos `422`.
+
+La documentación interactiva (Swagger) está en **`/api/usuarios/docs`**: haz login, copia el `access_token` y pégalo en el botón *Authorize*.
+
+### Cuentas de demostración
+
+La primera vez que arranca el servicio (con la tabla vacía) se crean estos datos de demostración:
+
+| Rol | Email | Contraseña |
+|---|---|---|
+| Cliente | `maria.perez@gmail.com`, `jose.rodriguez@gmail.com`, `ana.gomez@ujap.edu.ve` | `Cliente2026` |
+| Administrador | el de `ADMIN_EMAIL` | el de `ADMIN_PASSWORD` |
+
+El administrador se crea si no existe ninguno, con las variables `ADMIN_EMAIL` y `ADMIN_PASSWORD` de tu `.env`.
+
+## Cómo probar lo publicado
 
 **Requisito:** Docker Desktop (o Docker Engine + Compose v2).
 
@@ -112,16 +174,30 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Resultado esperado: `postgres` y `mongodb` en estado `healthy`, y `gateway` en `running`.
+La primera vez tarda unos minutos (se descargan imágenes y se instalan las dependencias de Python). Resultado esperado: `postgres`, `mongodb` y `servicio-usuarios` en estado `healthy`, y `gateway` en `running`.
+
+Probar la autenticación a través del gateway:
+
+```bash
+# 1. Iniciar sesión como cliente de demostración → devuelve el access_token
+curl -s -X POST http://localhost/api/auth/login -H "Content-Type: application/json" \
+     -d '{"email": "maria.perez@gmail.com", "password": "Cliente2026"}'
+
+# 2. Con ese token: tus datos
+curl -s http://localhost/api/auth/yo -H "Authorization: Bearer <token>"
+
+# 3. Un cliente no puede listar usuarios → 403
+curl -s -i http://localhost/api/usuarios -H "Authorization: Bearer <token>"
+```
 
 Para comprobar las bases de datos:
 
 ```bash
-docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select version();"'
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select id, nombre, email, rol from usuarios;"'
 docker compose exec mongodb mongosh --quiet --eval "db.adminCommand('ping')"
 ```
 
-> Como todavía no existen los microservicios ni el frontend, el gateway responde `502 Bad Gateway` a cualquier ruta. Es lo esperado en esta parte.
+> Como todavía no existen el resto de microservicios ni el frontend, el gateway responde `502 Bad Gateway` en `/` y en sus rutas. Es lo esperado en esta etapa.
 
 Para detener todo:
 
@@ -130,7 +206,7 @@ docker compose down        # conserva los datos
 docker compose down -v     # también borra los datos
 ```
 
-Si el puerto 80 de tu equipo está ocupado, cambia `GATEWAY_PORT` en `.env` (por ejemplo, `8080`).
+Si el puerto 80 de tu equipo está ocupado, cambia `GATEWAY_PORT` en `.env` (por ejemplo, `8080`) y usa `http://localhost:8080`.
 
 ### Nombre local `tienda.ujap.test`
 
@@ -141,14 +217,15 @@ Para abrir el sistema como `http://tienda.ujap.test` hay que agregar el nombre a
 
 ## Variables de entorno
 
-Las credenciales **no están en el código**: se definen en `.env` (excluido de Git por `.gitignore`) y Docker Compose las pasa a cada contenedor. `.env.example` sirve de plantilla; **cambia los valores antes de usarlo fuera de tu equipo**.
+Las credenciales **no están en el código**: se definen en `.env` (excluido de Git por `.gitignore`) y Docker Compose las pasa a cada contenedor. `.env.example` sirve de plantilla. Los valores por defecto del código son solo para desarrollo: **cámbialos antes de usar el sistema fuera de tu equipo**.
 
 | Variable | Uso | Parte |
 |---|---|:-:|
 | `DB_USER`, `DB_PASS`, `DB_NAME` | PostgreSQL | 1 |
 | `MONGO_USER`, `MONGO_PASS`, `MONGO_DB` | MongoDB | 1 |
 | `GATEWAY_PORT` | Puerto del gateway en tu máquina (por defecto `80`) | 1 |
-| `JWT_SECRET`, `JWT_EXPIRA_MIN` | Firma y duración de los tokens de sesión | 2–5 |
+| `JWT_SECRET` | Secreto con el que se firman y verifican los tokens (mínimo 32 caracteres) | 2 |
+| `JWT_EXPIRA_MIN` | Duración de la sesión en minutos (por defecto 60) | 2 |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Cuenta de administrador que se crea al primer inicio | 2 |
 
 Para generar un `JWT_SECRET` aleatorio:
@@ -157,10 +234,11 @@ Para generar un `JWT_SECRET` aleatorio:
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-## Decisiones técnicas de la infraestructura
+## Decisiones técnicas
 
-- **Solo el gateway publica un puerto.** Las bases de datos y, más adelante, los microservicios no son accesibles desde fuera de Docker.
+- **Solo el gateway publica un puerto.** Las bases de datos y los microservicios no son accesibles desde fuera de Docker.
 - **Dos redes de Docker:** `backend` (bases de datos y microservicios) y `frontend` (gateway, frontend y microservicios). El gateway no puede llegar a las bases de datos.
-- **Healthchecks:** los servicios que dependan de una base de datos esperarán a que esté `healthy` antes de arrancar (`depends_on: condition: service_healthy`).
+- **Healthchecks:** cada microservicio espera a que su base de datos esté `healthy` antes de arrancar (`depends_on: condition: service_healthy`).
 - **Volúmenes** `pgdata` y `mongodata`: los datos persisten entre reinicios.
 - **Un solo origen para el navegador:** el frontend solo habla con el gateway, así que no hay problemas de CORS ni de puertos distintos.
+- **JWT con secreto compartido:** cada microservicio podrá validar los tokens por su cuenta, sin depender del servicio de usuarios en cada petición.
