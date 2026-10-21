@@ -1,0 +1,8 @@
+# Normaliza los finales de línea: el repositorio guarda siempre LF (Docker, Nginx, Java, Go y Python lo prefieren)
+* text=auto eol=lf
+
+# Archivos binarios: Git no debe tocarlos
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
