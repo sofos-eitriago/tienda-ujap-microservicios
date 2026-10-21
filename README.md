@@ -2,7 +2,7 @@
 
 Proyecto Final · **LPR07304 Lenguajes de Programación** · Universidad José Antonio Páez
 
-> **Estado del repositorio: parte 3 de 6.** Están publicadas la infraestructura base y los servicios de usuarios y de productos. Las demás partes se publicarán en el orden de la tabla de más abajo.
+> **Estado del repositorio: parte 4 de 6.** Están publicadas la infraestructura base y los servicios de usuarios, productos y actividad. Las demás partes se publicarán en el orden de la tabla de más abajo.
 
 ## ¿Qué hace el sistema?
 
@@ -55,8 +55,8 @@ El repositorio se publica por partes, ordenadas según sus dependencias: el serv
 |:-:|---|---|:-:|
 | 1 | Infraestructura base | `docker-compose.yml` con PostgreSQL y MongoDB, API Gateway (Nginx), variables de entorno y nombre local `tienda.ujap.test` | ✅ Publicada |
 | 2 | Servicio de usuarios y autenticación | `servicio-usuarios/` — Python · FastAPI · PostgreSQL: registro, login, roles y tokens JWT | ✅ Publicada |
-| 3 | **Servicio de productos** | `servicio-productos/` — Node.js · Express · MongoDB: catálogo y stock | ✅ Publicada |
-| 4 | Servicio de actividad | `servicio-actividad/` — Go · MongoDB | ⏳ Pendiente |
+| 3 | Servicio de productos | `servicio-productos/` — Node.js · Express · MongoDB: catálogo y stock | ✅ Publicada |
+| 4 | **Servicio de actividad** | `servicio-actividad/` — Go · MongoDB: historial de eventos del sistema | ✅ Publicada |
 | 5 | Servicio de pedidos | `servicio-pedidos/` — Java · Spring Boot · PostgreSQL | ⏳ Pendiente |
 | 6 | Frontend, pruebas y documentación | `frontend/`, `tests/`, capturas de pantalla y README completo | ⏳ Pendiente |
 
@@ -64,7 +64,7 @@ El repositorio se publica por partes, ordenadas según sus dependencias: el serv
 
 ```
 .
-├── docker-compose.yml        ← bases de datos, servicios de usuarios y productos, y API Gateway
+├── docker-compose.yml        ← bases de datos, servicios de usuarios, productos y actividad, y API Gateway
 ├── .env.example              ← plantilla de variables de entorno
 ├── .gitignore
 ├── .gitattributes
@@ -82,16 +82,20 @@ El repositorio se publica por partes, ordenadas según sus dependencias: el serv
 │       ├── schemas.py        ← validación de datos (Pydantic)
 │       ├── database.py       ← conexión a PostgreSQL
 │       └── actividad.py      ← envío de eventos al servicio de actividad
-└── servicio-productos/       ← parte 3
-    ├── Dockerfile
-    ├── package.json / package-lock.json
-    └── src/
-        ├── index.js              ← arranque, conexión a MongoDB y manejo de errores
-        ├── productos.routes.js   ← rutas del catálogo y del stock
-        ├── producto.model.js     ← colección `productos` (Mongoose)
-        ├── auth.js               ← verificación de tokens JWT y permisos por rol
-        ├── actividad.js          ← envío de eventos al servicio de actividad
-        └── seed.js               ← productos de ejemplo
+├── servicio-productos/       ← parte 3
+│   ├── Dockerfile
+│   ├── package.json / package-lock.json
+│   └── src/
+│       ├── index.js              ← arranque, conexión a MongoDB y manejo de errores
+│       ├── productos.routes.js   ← rutas del catálogo y del stock
+│       ├── producto.model.js     ← colección `productos` (Mongoose)
+│       ├── auth.js               ← verificación de tokens JWT y permisos por rol
+│       ├── actividad.js          ← envío de eventos al servicio de actividad
+│       └── seed.js               ← productos de ejemplo
+└── servicio-actividad/       ← parte 4
+    ├── Dockerfile            ← compilación en dos etapas: la imagen final solo lleva el binario
+    ├── go.mod / go.sum
+    └── main.go               ← servidor HTTP, verificación de JWT y acceso a MongoDB
 ```
 
 ## Parte 1 — Infraestructura base
@@ -130,7 +134,7 @@ Microservicio en **Python 3.12 + FastAPI + SQLAlchemy 2** que guarda los usuario
 - Al iniciar sesión se emite un **token JWT** (HS256) que expira a los `JWT_EXPIRA_MIN` minutos (60 por defecto). Los demás microservicios verifican ese token con el mismo `JWT_SECRET`, sin consultar a este servicio en cada petición.
 - Hay dos roles: **cliente** y **administrador**. Quien crea su propia cuenta siempre queda como cliente.
 - La tabla `usuarios` la crea el propio servicio al arrancar, con reintentos hasta que PostgreSQL esté listo.
-- Cada acción importante (inicio de sesión, registro, alta, cambio y baja de usuarios) se envía como evento al servicio de actividad (parte 4). Mientras esa parte no exista, el servicio deja un aviso en el log y sigue funcionando.
+- Cada acción importante (inicio de sesión, registro, alta, cambio y baja de usuarios) se envía como evento al servicio de actividad. Si ese servicio no está disponible, deja un aviso en el log y sigue funcionando.
 
 ### Permisos
 
@@ -179,7 +183,7 @@ Microservicio en **Node.js 22 + Express 5 + Mongoose 8** que guarda el catálogo
 - **Verifica los tokens JWT** que emite el servicio de usuarios, con el mismo `JWT_SECRET`, sin consultarle nada. El catálogo se puede **leer sin iniciar sesión**; para modificarlo hay que ser administrador.
 - La primera vez que arranca, con la colección vacía, carga **6 productos de ejemplo**.
 - **Validación:** el precio no puede ser negativo y el stock debe ser un entero mayor o igual que 0 (`400`). Un id con formato inválido responde `404`. La búsqueda `?q=` no distingue mayúsculas y escapa los caracteres especiales.
-- Cada alta, cambio y baja de producto se envía como evento al servicio de actividad (parte 4). Mientras esa parte no exista, el servicio deja un aviso en el log y sigue funcionando.
+- Cada alta, cambio y baja de producto se envía como evento al servicio de actividad. Si ese servicio no está disponible, deja un aviso en el log y sigue funcionando.
 - Arranca con reintentos hasta que MongoDB esté disponible, y la imagen corre con un usuario sin privilegios (`node`).
 
 ### Stock a prueba de fallos
@@ -212,6 +216,40 @@ Los endpoints `reservar` y `liberar` son para uso **interno**: solo aceptan un t
 | POST | `/api/productos/{id}/liberar` | 🔒 servicio (interno) | `{cantidad, referencia}` devuelve stock reservado |
 | GET | `/health` | público | Estado del servicio (el gateway lo publica como `/estado/productos`) |
 
+## Parte 4 — Servicio de actividad
+
+Microservicio en **Go 1.25** (solo la biblioteca estándar `net/http` más el driver oficial de MongoDB y una biblioteca de JWT) que guarda en **MongoDB** (colección `eventos`) el historial de todo lo que ocurre en el sistema.
+
+- Los demás microservicios le **envían un evento** por cada acción importante. Cada evento tiene `servicio`, `tipo`, `mensaje`, `datos` opcionales y la `fecha` (que pone el servidor).
+- **Solo el administrador puede consultar** el historial; **solo otros microservicios pueden registrar** eventos. Verifica los tokens JWT con el mismo `JWT_SECRET` (`401` si falta o es inválido o expiró, `403` si el rol no corresponde).
+- El resumen usa una **agregación de MongoDB** (`$group`) para contar los eventos por microservicio.
+- **Dependencia opcional:** si este servicio no está disponible, los demás siguen funcionando; solo se pierde ese registro y dejan un aviso en su log.
+- Se compila en **dos etapas**: la imagen final solo contiene el binario y corre con un usuario sin privilegios (`nobody`).
+- Reintenta la conexión a MongoDB hasta que esté listo y registra cada petición en el log (salvo `/health`).
+
+Eventos que ya generan las partes publicadas:
+
+| Servicio | Tipos de evento |
+|---|---|
+| `usuarios` | `SESION_INICIADA`, `USUARIO_REGISTRADO`, `USUARIO_CREADO`, `USUARIO_ACTUALIZADO`, `USUARIO_ELIMINADO` |
+| `productos` | `PRODUCTO_CREADO`, `PRODUCTO_ACTUALIZADO`, `PRODUCTO_ELIMINADO` |
+
+### Permisos
+
+| Acción | Sin sesión | Cliente | Administrador | Otro microservicio |
+|---|:-:|:-:|:-:|:-:|
+| Consultar eventos y resumen | | | ✅ | |
+| Registrar un evento | | | | ✅ |
+
+### Endpoints
+
+| Método | Ruta | Quién | Descripción |
+|---|---|---|---|
+| GET | `/api/eventos?servicio=&limite=` | 🔒 admin | Últimos eventos, del más reciente al más antiguo (`limite` entre 1 y 500, por defecto 50) |
+| GET | `/api/eventos/resumen` | 🔒 admin | `{total, por_servicio: [{servicio, total}]}` |
+| POST | `/api/eventos` | 🔒 servicio (interno) | `{servicio, tipo, mensaje, datos?}` → `201`; `400` si falta alguno de los tres primeros |
+| GET | `/health` | público | Estado del servicio (el gateway lo publica como `/estado/actividad`) |
+
 ## Cómo probar lo publicado
 
 **Requisito:** Docker Desktop (o Docker Engine + Compose v2).
@@ -224,7 +262,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-La primera vez tarda unos minutos (se descargan imágenes y se instalan las dependencias). Resultado esperado: `postgres`, `mongodb`, `servicio-usuarios` y `servicio-productos` en estado `healthy`, y `gateway` en `running`.
+La primera vez tarda unos minutos (se descargan imágenes y se instalan o compilan las dependencias). Resultado esperado: `postgres`, `mongodb`, `servicio-usuarios`, `servicio-productos` y `servicio-actividad` en estado `healthy`, y `gateway` en `running`.
 
 Probar la autenticación (parte 2) a través del gateway:
 
@@ -260,14 +298,31 @@ curl -s -X POST http://localhost/api/productos -H "Authorization: Bearer <token-
 curl -s -i -X POST http://localhost/api/productos/<id>/reservar
 ```
 
+Probar el historial de actividad (parte 4). Las acciones anteriores ya generaron eventos:
+
+```bash
+# El administrador consulta los últimos eventos y el resumen por servicio
+curl -s "http://localhost/api/eventos?limite=5" -H "Authorization: Bearer <token-admin>"
+curl -s http://localhost/api/eventos/resumen -H "Authorization: Bearer <token-admin>"
+
+# Solo los eventos de un servicio
+curl -s "http://localhost/api/eventos?servicio=productos" -H "Authorization: Bearer <token-admin>"
+
+# Un cliente no puede consultarlo → 403; sin token → 401
+curl -s -i http://localhost/api/eventos -H "Authorization: Bearer <token-cliente>"
+
+# Registrar eventos desde fuera está bloqueado en el gateway → 403
+curl -s -i -X POST http://localhost/api/eventos
+```
+
 Para comprobar las bases de datos:
 
 ```bash
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select id, nombre, email, rol from usuarios;"'
-docker compose exec mongodb sh -c 'mongosh -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --quiet tienda --eval "db.productos.countDocuments()"'
+docker compose exec mongodb sh -c 'mongosh -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --quiet tienda --eval "db.productos.countDocuments(); db.eventos.countDocuments()"'
 ```
 
-> Como todavía no existen el resto de microservicios ni el frontend, el gateway responde `502 Bad Gateway` en `/` y en las rutas de esos servicios. Es lo esperado en esta etapa.
+> Como todavía no existen el servicio de pedidos ni el frontend, el gateway responde `502 Bad Gateway` en `/` y en `/api/pedidos`. Es lo esperado en esta etapa.
 
 Para detener todo:
 
@@ -292,9 +347,9 @@ Las credenciales **no están en el código**: se definen en `.env` (excluido de 
 | Variable | Uso | Parte |
 |---|---|:-:|
 | `DB_USER`, `DB_PASS`, `DB_NAME` | PostgreSQL | 1 |
-| `MONGO_USER`, `MONGO_PASS`, `MONGO_DB` | MongoDB | 1 y 3 |
+| `MONGO_USER`, `MONGO_PASS`, `MONGO_DB` | MongoDB | 1, 3 y 4 |
 | `GATEWAY_PORT` | Puerto del gateway en tu máquina (por defecto `80`) | 1 |
-| `JWT_SECRET` | Secreto con el que se firman y verifican los tokens (mínimo 32 caracteres) | 2 y 3 |
+| `JWT_SECRET` | Secreto con el que se firman y verifican los tokens (mínimo 32 caracteres) | 2, 3 y 4 |
 | `JWT_EXPIRA_MIN` | Duración de la sesión en minutos (por defecto 60) | 2 |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Cuenta de administrador que se crea al primer inicio | 2 |
 
@@ -313,3 +368,4 @@ python -c "import secrets; print(secrets.token_hex(32))"
 - **Un solo origen para el navegador:** el frontend solo habla con el gateway, así que no hay problemas de CORS ni de puertos distintos.
 - **JWT con secreto compartido:** cada microservicio valida los tokens por su cuenta, sin depender del servicio de usuarios en cada petición.
 - **Operaciones de stock atómicas e idempotentes:** el estado se protege en la propia base de datos, no en el código que la llama.
+- **Registro de eventos desacoplado:** los servicios envían los eventos sin esperar la respuesta y, si el servicio de actividad falla, lo ignoran; una caída del historial no interrumpe las ventas.

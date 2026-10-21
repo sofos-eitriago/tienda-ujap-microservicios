@@ -1,7 +1,7 @@
 # Proyecto Final LPR07304 — Tienda en línea con microservicios
 #
-# PARTE 3 DE 6 — Infraestructura base + servicios de usuarios y de productos.
-# Los demás microservicios y el frontend se agregan a este archivo en las partes siguientes.
+# PARTE 4 DE 6 — Infraestructura base + servicios de usuarios, productos y actividad.
+# El servicio de pedidos y el frontend se agregan a este archivo en las partes siguientes.
 #
 # Levantar lo publicado hasta ahora:
 #   docker compose up -d --build
@@ -34,7 +34,7 @@ services:
       retries: 12
     restart: unless-stopped
 
-  mongodb:                          # NoSQL — la usan servicio-productos y (parte 4) servicio-actividad
+  mongodb:                          # NoSQL — la usan servicio-productos y servicio-actividad
     image: mongo:7
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
@@ -63,7 +63,7 @@ services:
       DB_USER: ${DB_USER:-admin}
       DB_PASS: ${DB_PASS:-admin123}
       DB_NAME: ${DB_NAME:-tienda}
-      ACTIVIDAD_URL: http://servicio-actividad:8080   # servicio de la parte 4; mientras no exista solo se registra un aviso
+      ACTIVIDAD_URL: http://servicio-actividad:8080
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,7 +83,7 @@ services:
       <<: *jwt
       PORT: 3000
       MONGO_URL: mongodb://${MONGO_USER:-admin}:${MONGO_PASS:-admin123}@mongodb:27017/${MONGO_DB:-tienda}?authSource=admin
-      ACTIVIDAD_URL: http://servicio-actividad:8080   # servicio de la parte 4; mientras no exista solo se registra un aviso
+      ACTIVIDAD_URL: http://servicio-actividad:8080
     depends_on:
       mongodb:
         condition: service_healthy
@@ -96,6 +96,25 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  servicio-actividad:               # Go + net/http + driver oficial de MongoDB — historial de eventos
+    build: ./servicio-actividad
+    environment:
+      <<: *jwt
+      PORT: 8080
+      MONGO_URL: mongodb://${MONGO_USER:-admin}:${MONGO_PASS:-admin123}@mongodb:27017/?authSource=admin
+      MONGO_DB: ${MONGO_DB:-tienda}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks: [backend, frontend]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
   # ───────────────────────────── API Gateway ─────────────────────────────
   gateway:                          # Nginx: único punto de entrada al sistema
     build: ./gateway
@@ -103,6 +122,7 @@ services:
     depends_on:
       - servicio-usuarios
       - servicio-productos
+      - servicio-actividad
     networks: [frontend]
     restart: unless-stopped
 
