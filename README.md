@@ -2,7 +2,7 @@
 
 Proyecto Final · **LPR07304 Lenguajes de Programación** · Universidad José Antonio Páez
 
-> **Estado del repositorio: parte 2 de 6.** Están publicadas la infraestructura base y el servicio de usuarios y autenticación. Las demás partes se publicarán en el orden de la tabla de más abajo.
+> **Estado del repositorio: parte 3 de 6.** Están publicadas la infraestructura base y los servicios de usuarios y de productos. Las demás partes se publicarán en el orden de la tabla de más abajo.
 
 ## ¿Qué hace el sistema?
 
@@ -54,8 +54,8 @@ El repositorio se publica por partes, ordenadas según sus dependencias: el serv
 | # | Parte | Contenido | Estado |
 |:-:|---|---|:-:|
 | 1 | Infraestructura base | `docker-compose.yml` con PostgreSQL y MongoDB, API Gateway (Nginx), variables de entorno y nombre local `tienda.ujap.test` | ✅ Publicada |
-| 2 | **Servicio de usuarios y autenticación** | `servicio-usuarios/` — Python · FastAPI · PostgreSQL: registro, login, roles y tokens JWT | ✅ Publicada |
-| 3 | Servicio de productos | `servicio-productos/` — Node.js · Express · MongoDB | ⏳ Pendiente |
+| 2 | Servicio de usuarios y autenticación | `servicio-usuarios/` — Python · FastAPI · PostgreSQL: registro, login, roles y tokens JWT | ✅ Publicada |
+| 3 | **Servicio de productos** | `servicio-productos/` — Node.js · Express · MongoDB: catálogo y stock | ✅ Publicada |
 | 4 | Servicio de actividad | `servicio-actividad/` — Go · MongoDB | ⏳ Pendiente |
 | 5 | Servicio de pedidos | `servicio-pedidos/` — Java · Spring Boot · PostgreSQL | ⏳ Pendiente |
 | 6 | Frontend, pruebas y documentación | `frontend/`, `tests/`, capturas de pantalla y README completo | ⏳ Pendiente |
@@ -64,7 +64,7 @@ El repositorio se publica por partes, ordenadas según sus dependencias: el serv
 
 ```
 .
-├── docker-compose.yml        ← PostgreSQL, MongoDB, servicio de usuarios y API Gateway
+├── docker-compose.yml        ← bases de datos, servicios de usuarios y productos, y API Gateway
 ├── .env.example              ← plantilla de variables de entorno
 ├── .gitignore
 ├── .gitattributes
@@ -72,16 +72,26 @@ El repositorio se publica por partes, ordenadas según sus dependencias: el serv
 ├── gateway/
 │   ├── Dockerfile
 │   └── nginx.conf            ← rutas hacia cada microservicio
-└── servicio-usuarios/        ← parte 2
+├── servicio-usuarios/        ← parte 2
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── app/
+│       ├── main.py           ← rutas de autenticación y de usuarios
+│       ├── seguridad.py      ← bcrypt, tokens JWT y permisos por rol
+│       ├── models.py         ← tabla `usuarios` (SQLAlchemy)
+│       ├── schemas.py        ← validación de datos (Pydantic)
+│       ├── database.py       ← conexión a PostgreSQL
+│       └── actividad.py      ← envío de eventos al servicio de actividad
+└── servicio-productos/       ← parte 3
     ├── Dockerfile
-    ├── requirements.txt
-    └── app/
-        ├── main.py           ← rutas de autenticación y de usuarios
-        ├── seguridad.py      ← bcrypt, tokens JWT y permisos por rol
-        ├── models.py         ← tabla `usuarios` (SQLAlchemy)
-        ├── schemas.py        ← validación de datos (Pydantic)
-        ├── database.py       ← conexión a PostgreSQL
-        └── actividad.py      ← envío de eventos al servicio de actividad
+    ├── package.json / package-lock.json
+    └── src/
+        ├── index.js              ← arranque, conexión a MongoDB y manejo de errores
+        ├── productos.routes.js   ← rutas del catálogo y del stock
+        ├── producto.model.js     ← colección `productos` (Mongoose)
+        ├── auth.js               ← verificación de tokens JWT y permisos por rol
+        ├── actividad.js          ← envío de eventos al servicio de actividad
+        └── seed.js               ← productos de ejemplo
 ```
 
 ## Parte 1 — Infraestructura base
@@ -117,7 +127,7 @@ El gateway resuelve los nombres de los servicios en cada petición, así que arr
 Microservicio en **Python 3.12 + FastAPI + SQLAlchemy 2** que guarda los usuarios en **PostgreSQL**. Cumple dos funciones: administrar usuarios y **autenticar** (inicio de sesión y emisión de tokens).
 
 - Las contraseñas se guardan cifradas con **bcrypt**; nunca en texto plano. Un email inexistente y una contraseña incorrecta devuelven el mismo mensaje.
-- Al iniciar sesión se emite un **token JWT** (HS256) que expira a los `JWT_EXPIRA_MIN` minutos (60 por defecto). Los demás microservicios (partes 3 a 5) verificarán ese token con el mismo `JWT_SECRET`, sin consultar a este servicio en cada petición.
+- Al iniciar sesión se emite un **token JWT** (HS256) que expira a los `JWT_EXPIRA_MIN` minutos (60 por defecto). Los demás microservicios verifican ese token con el mismo `JWT_SECRET`, sin consultar a este servicio en cada petición.
 - Hay dos roles: **cliente** y **administrador**. Quien crea su propia cuenta siempre queda como cliente.
 - La tabla `usuarios` la crea el propio servicio al arrancar, con reintentos hasta que PostgreSQL esté listo.
 - Cada acción importante (inicio de sesión, registro, alta, cambio y baja de usuarios) se envía como evento al servicio de actividad (parte 4). Mientras esa parte no exista, el servicio deja un aviso en el log y sigue funcionando.
@@ -162,6 +172,46 @@ La primera vez que arranca el servicio (con la tabla vacía) se crean estos dato
 
 El administrador se crea si no existe ninguno, con las variables `ADMIN_EMAIL` y `ADMIN_PASSWORD` de tu `.env`.
 
+## Parte 3 — Servicio de productos
+
+Microservicio en **Node.js 22 + Express 5 + Mongoose 8** que guarda el catálogo en **MongoDB** (colección `productos`).
+
+- **Verifica los tokens JWT** que emite el servicio de usuarios, con el mismo `JWT_SECRET`, sin consultarle nada. El catálogo se puede **leer sin iniciar sesión**; para modificarlo hay que ser administrador.
+- La primera vez que arranca, con la colección vacía, carga **6 productos de ejemplo**.
+- **Validación:** el precio no puede ser negativo y el stock debe ser un entero mayor o igual que 0 (`400`). Un id con formato inválido responde `404`. La búsqueda `?q=` no distingue mayúsculas y escapa los caracteres especiales.
+- Cada alta, cambio y baja de producto se envía como evento al servicio de actividad (parte 4). Mientras esa parte no exista, el servicio deja un aviso en el log y sigue funcionando.
+- Arranca con reintentos hasta que MongoDB esté disponible, y la imagen corre con un usuario sin privilegios (`node`).
+
+### Stock a prueba de fallos
+
+Los endpoints `reservar` y `liberar` son para uso **interno**: solo aceptan un token de *servicio* (el que firmará el servicio de pedidos, parte 5) y el gateway los bloquea desde fuera.
+
+- **Sin sobreventa:** comprobar que hay stock suficiente y descontarlo ocurre en **una sola operación atómica** sobre el documento. Con varias compras simultáneas nunca se vende más de lo que hay.
+- **Idempotentes:** cada operación lleva una `referencia` única (por ejemplo, `pedido-12-<producto>`). Si la misma reserva se repite por un reintento o un *timeout*, el stock no se descuenta dos veces.
+- **Liberar es seguro:** solo devuelve stock de una reserva que realmente se aplicó, y nunca dos veces.
+- Las referencias ya usadas se guardan en un campo interno (`movimientos`) que no aparece en las respuestas de la API.
+
+### Permisos
+
+| Acción | Sin sesión | Cliente | Administrador | Otro microservicio |
+|---|:-:|:-:|:-:|:-:|
+| Ver el catálogo y buscar | ✅ | ✅ | ✅ | ✅ |
+| Crear, modificar y eliminar productos | | | ✅ | |
+| Reservar y liberar stock | | | | ✅ |
+
+### Endpoints
+
+| Método | Ruta | Quién | Descripción |
+|---|---|---|---|
+| GET | `/api/productos?q=&categoria=` | público | Catálogo, con búsqueda por nombre y filtro por categoría |
+| GET | `/api/productos/{id}` | público | Un producto |
+| POST | `/api/productos` | 🔒 admin | Crear `{nombre, precio, stock, categoria?, descripcion?}` |
+| PUT | `/api/productos/{id}` | 🔒 admin | Actualizar |
+| DELETE | `/api/productos/{id}` | 🔒 admin | Eliminar |
+| POST | `/api/productos/{id}/reservar` | 🔒 servicio (interno) | `{cantidad, referencia}` descuenta stock; `409` si no alcanza |
+| POST | `/api/productos/{id}/liberar` | 🔒 servicio (interno) | `{cantidad, referencia}` devuelve stock reservado |
+| GET | `/health` | público | Estado del servicio (el gateway lo publica como `/estado/productos`) |
+
 ## Cómo probar lo publicado
 
 **Requisito:** Docker Desktop (o Docker Engine + Compose v2).
@@ -174,9 +224,9 @@ docker compose up -d --build
 docker compose ps
 ```
 
-La primera vez tarda unos minutos (se descargan imágenes y se instalan las dependencias de Python). Resultado esperado: `postgres`, `mongodb` y `servicio-usuarios` en estado `healthy`, y `gateway` en `running`.
+La primera vez tarda unos minutos (se descargan imágenes y se instalan las dependencias). Resultado esperado: `postgres`, `mongodb`, `servicio-usuarios` y `servicio-productos` en estado `healthy`, y `gateway` en `running`.
 
-Probar la autenticación a través del gateway:
+Probar la autenticación (parte 2) a través del gateway:
 
 ```bash
 # 1. Iniciar sesión como cliente de demostración → devuelve el access_token
@@ -190,14 +240,34 @@ curl -s http://localhost/api/auth/yo -H "Authorization: Bearer <token>"
 curl -s -i http://localhost/api/usuarios -H "Authorization: Bearer <token>"
 ```
 
+Probar el catálogo (parte 3):
+
+```bash
+# El catálogo es público (no necesita token)
+curl -s http://localhost/api/productos
+curl -s "http://localhost/api/productos?q=laptop"
+
+# Crear un producto sin token → 401
+curl -s -i -X POST http://localhost/api/productos -H "Content-Type: application/json" \
+     -d '{"nombre": "Webcam Logitech C920", "precio": 59.9, "stock": 10}'
+
+# Con el token del administrador (inicia sesión con ADMIN_EMAIL y ADMIN_PASSWORD de tu .env) → 201
+curl -s -X POST http://localhost/api/productos -H "Authorization: Bearer <token-admin>" \
+     -H "Content-Type: application/json" \
+     -d '{"nombre": "Webcam Logitech C920", "precio": 59.9, "stock": 10, "categoria": "Accesorios"}'
+
+# Los endpoints internos están bloqueados desde fuera → 403
+curl -s -i -X POST http://localhost/api/productos/<id>/reservar
+```
+
 Para comprobar las bases de datos:
 
 ```bash
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select id, nombre, email, rol from usuarios;"'
-docker compose exec mongodb mongosh --quiet --eval "db.adminCommand('ping')"
+docker compose exec mongodb sh -c 'mongosh -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --quiet tienda --eval "db.productos.countDocuments()"'
 ```
 
-> Como todavía no existen el resto de microservicios ni el frontend, el gateway responde `502 Bad Gateway` en `/` y en sus rutas. Es lo esperado en esta etapa.
+> Como todavía no existen el resto de microservicios ni el frontend, el gateway responde `502 Bad Gateway` en `/` y en las rutas de esos servicios. Es lo esperado en esta etapa.
 
 Para detener todo:
 
@@ -222,9 +292,9 @@ Las credenciales **no están en el código**: se definen en `.env` (excluido de 
 | Variable | Uso | Parte |
 |---|---|:-:|
 | `DB_USER`, `DB_PASS`, `DB_NAME` | PostgreSQL | 1 |
-| `MONGO_USER`, `MONGO_PASS`, `MONGO_DB` | MongoDB | 1 |
+| `MONGO_USER`, `MONGO_PASS`, `MONGO_DB` | MongoDB | 1 y 3 |
 | `GATEWAY_PORT` | Puerto del gateway en tu máquina (por defecto `80`) | 1 |
-| `JWT_SECRET` | Secreto con el que se firman y verifican los tokens (mínimo 32 caracteres) | 2 |
+| `JWT_SECRET` | Secreto con el que se firman y verifican los tokens (mínimo 32 caracteres) | 2 y 3 |
 | `JWT_EXPIRA_MIN` | Duración de la sesión en minutos (por defecto 60) | 2 |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Cuenta de administrador que se crea al primer inicio | 2 |
 
@@ -241,4 +311,5 @@ python -c "import secrets; print(secrets.token_hex(32))"
 - **Healthchecks:** cada microservicio espera a que su base de datos esté `healthy` antes de arrancar (`depends_on: condition: service_healthy`).
 - **Volúmenes** `pgdata` y `mongodata`: los datos persisten entre reinicios.
 - **Un solo origen para el navegador:** el frontend solo habla con el gateway, así que no hay problemas de CORS ni de puertos distintos.
-- **JWT con secreto compartido:** cada microservicio podrá validar los tokens por su cuenta, sin depender del servicio de usuarios en cada petición.
+- **JWT con secreto compartido:** cada microservicio valida los tokens por su cuenta, sin depender del servicio de usuarios en cada petición.
+- **Operaciones de stock atómicas e idempotentes:** el estado se protege en la propia base de datos, no en el código que la llama.
