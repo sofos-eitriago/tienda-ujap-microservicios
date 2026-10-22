@@ -2,16 +2,36 @@
 
 Proyecto Final · **LPR07304 Lenguajes de Programación** · Universidad José Antonio Páez
 
-> **Estado del repositorio: parte 5 de 6.** Están publicadas la infraestructura base y los cuatro microservicios. Solo falta la última parte: el frontend, las pruebas automáticas y la documentación final.
-
 ## ¿Qué hace el sistema?
 
 **Tienda UJAP** es una tienda en línea de productos de computación y tecnología:
 
-- **Los clientes** crean su cuenta, consultan el catálogo, arman pedidos con uno o varios productos y siguen su estado.
-- **El administrador** gestiona usuarios y catálogo, ve todos los pedidos y consulta un historial de actividad.
+- **Los clientes** crean su cuenta, consultan el catálogo con precios y disponibilidad, arman pedidos con uno o varios productos y siguen su estado. Pueden cancelar un pedido mientras esté pendiente.
+- **El administrador** gestiona usuarios y catálogo, ve todos los pedidos, cambia su estado y consulta un **historial de actividad** de todo lo que ocurre en el sistema.
 
-Cada parte del sistema es un **microservicio escrito en un lenguaje distinto**, con su propio contenedor Docker. Cuando esté publicada la última parte, todo se levantará con **un solo comando** y con interfaz web.
+Al confirmar un pedido, el sistema verifica que el cliente existe, **reserva el stock** de cada producto (sin vender nunca más de lo que hay, aunque varias personas compren a la vez) y registra el evento. Si hay que devolver stock, se devuelve exactamente una vez.
+
+Cada parte del sistema es un **microservicio escrito en un lenguaje distinto**, con su propio contenedor Docker, y todo se levanta con **un solo comando**.
+
+## Capturas
+
+| Inicio de sesión | Catálogo (vista de cliente) |
+|---|---|
+| ![Inicio de sesión](docs/capturas/01-login.png) | ![Catálogo](docs/capturas/02-productos-cliente.png) |
+
+| Pedido con varios productos (cliente) | Todos los pedidos (administrador) |
+|---|---|
+| ![Mis pedidos](docs/capturas/03-pedidos-cliente.png) | ![Pedidos admin](docs/capturas/04-pedidos-admin.png) |
+
+| Usuarios (administrador) | Actividad en tiempo real (administrador) |
+|---|---|
+| ![Usuarios](docs/capturas/05-usuarios-admin.png) | ![Actividad](docs/capturas/06-actividad-admin.png) |
+
+**Servicios respondiendo** — Swagger del servicio de usuarios (FastAPI) y respuesta JSON del servicio de productos (Express):
+
+| Swagger — usuarios | API — productos |
+|---|---|
+| ![Swagger](docs/capturas/07-swagger-usuarios.png) | ![API productos](docs/capturas/08-api-productos.png) |
 
 ## Arquitectura
 
@@ -49,29 +69,38 @@ Cuatro microservicios, **dos por cada base de datos**:
 
 ## Las 6 partes del repositorio
 
-El repositorio se publica por partes, ordenadas según sus dependencias: el servicio de pedidos usa a los otros tres, por eso va después de ellos.
+El repositorio se publicó por partes, ordenadas según sus dependencias: el servicio de pedidos usa a los otros tres, por eso va después de ellos. Cada parte deja un sistema coherente y probado.
 
 | # | Parte | Contenido | Estado |
 |:-:|---|---|:-:|
-| 1 | Infraestructura base | `docker-compose.yml` con PostgreSQL y MongoDB, API Gateway (Nginx), variables de entorno y nombre local `tienda.ujap.test` | ✅ Publicada |
-| 2 | Servicio de usuarios y autenticación | `servicio-usuarios/` — Python · FastAPI · PostgreSQL: registro, login, roles y tokens JWT | ✅ Publicada |
-| 3 | Servicio de productos | `servicio-productos/` — Node.js · Express · MongoDB: catálogo y stock | ✅ Publicada |
-| 4 | Servicio de actividad | `servicio-actividad/` — Go · MongoDB: historial de eventos del sistema | ✅ Publicada |
-| 5 | **Servicio de pedidos** | `servicio-pedidos/` — Java · Spring Boot · PostgreSQL: pedidos con varios productos | ✅ Publicada |
-| 6 | Frontend, pruebas y documentación | `frontend/`, `tests/`, capturas de pantalla y README completo | ⏳ Pendiente |
+| 1 | Infraestructura base | `docker-compose.yml` con PostgreSQL y MongoDB, API Gateway (Nginx), variables de entorno y nombre local `tienda.ujap.test` | ✅ |
+| 2 | Servicio de usuarios y autenticación | `servicio-usuarios/` — Python · FastAPI · PostgreSQL: registro, login, roles y tokens JWT | ✅ |
+| 3 | Servicio de productos | `servicio-productos/` — Node.js · Express · MongoDB: catálogo y stock | ✅ |
+| 4 | Servicio de actividad | `servicio-actividad/` — Go · MongoDB: historial de eventos del sistema | ✅ |
+| 5 | Servicio de pedidos | `servicio-pedidos/` — Java · Spring Boot · PostgreSQL: pedidos con varios productos | ✅ |
+| 6 | Frontend, pruebas y documentación | `frontend/`, `tests/`, `docs/capturas/`, `docker-compose.debug.yml` y este README | ✅ |
 
-## Contenido publicado
+## Contenido del repositorio
 
 ```
 .
-├── docker-compose.yml        ← bases de datos, los 4 microservicios y el API Gateway
+├── docker-compose.yml        ← orquesta los 8 contenedores
+├── docker-compose.debug.yml  ← (opcional) publica los puertos de cada microservicio
 ├── .env.example              ← plantilla de variables de entorno
 ├── .gitignore
 ├── .gitattributes
 ├── configurar-dominio.ps1    ← agrega tienda.ujap.test al archivo hosts (Windows)
+├── README.md
+├── docs/capturas/            ← capturas de pantalla
+├── tests/e2e.py              ← pruebas de extremo a extremo
 ├── gateway/
 │   ├── Dockerfile
 │   └── nginx.conf            ← rutas hacia cada microservicio
+├── frontend/                 ← parte 6
+│   ├── Dockerfile
+│   ├── index.html
+│   ├── style.css
+│   └── app.js
 ├── servicio-usuarios/        ← parte 2
 │   ├── Dockerfile
 │   ├── requirements.txt
@@ -109,6 +138,54 @@ El repositorio se publica por partes, ordenadas según sus dependencias: el serv
             ├── seguridad/      ← verificación y firma de tokens JWT
             ├── dto/            ← cuerpos de las peticiones, con validaciones
             └── web/            ← controladores REST y manejo de errores
+```
+
+## Cómo ejecutarlo
+
+**Requisito:** Docker Desktop (o Docker Engine + Compose v2).
+
+```bash
+git clone <url-del-repositorio>
+cd <carpeta-del-repositorio>
+cp .env.example .env            # en Windows: copy .env.example .env
+docker compose up --build
+```
+
+La primera vez tarda varios minutos (se descargan imágenes y se compilan los servicios, sobre todo el de Java). Con `docker compose up -d --build` se levanta en segundo plano; `docker compose ps` debe mostrar `postgres`, `mongodb` y los cuatro microservicios en estado `healthy`, y `frontend` y `gateway` en `running`. El servicio de pedidos es el último en estar listo.
+
+### Abrir el sistema
+
+- **http://localhost** — funciona siempre, sin configurar nada.
+- **http://tienda.ujap.test** — requiere agregar el nombre al archivo `hosts` una sola vez:
+  - **Windows:** clic derecho en `configurar-dominio.ps1` → *Ejecutar con PowerShell* (pide permiso de administrador).
+  - **Linux / macOS:** `echo "127.0.0.1 tienda.ujap.test" | sudo tee -a /etc/hosts`
+
+Si el puerto 80 de tu equipo está ocupado, cambia `GATEWAY_PORT` en `.env` (por ejemplo, `8080`) y abre `http://localhost:8080`.
+
+| Qué | Dirección |
+|---|---|
+| **Aplicación** | http://localhost |
+| Swagger del servicio de usuarios | http://localhost/api/usuarios/docs |
+| Catálogo (JSON, público) | http://localhost/api/productos |
+
+### Cuentas de demostración
+
+Se crean al iniciar por primera vez, junto con **6 productos** de ejemplo:
+
+| Rol | Email | Contraseña |
+|---|---|---|
+| Administrador | el de `ADMIN_EMAIL` (por defecto `admin@tienda.com`) | el de `ADMIN_PASSWORD` de tu `.env` |
+| Cliente | `maria.perez@gmail.com`, `jose.rodriguez@gmail.com`, `ana.gomez@ujap.edu.ve` | `Cliente2026` |
+
+En la pantalla de inicio de sesión, los botones de *Cuentas de prueba* rellenan el formulario (la del administrador solo el email: la contraseña es la de tu `.env`).
+
+### Comandos útiles
+
+```bash
+docker compose ps                         # estado de los contenedores (healthy / starting)
+docker compose logs -f servicio-pedidos   # ver los registros de un servicio
+docker compose down                       # detener todo (los datos se conservan)
+docker compose down -v                    # detener y BORRAR los datos (vuelve a cargar los de ejemplo)
 ```
 
 ## Parte 1 — Infraestructura base
@@ -178,16 +255,9 @@ La contraseña debe tener entre 8 y 72 caracteres. Un email repetido responde `4
 
 La documentación interactiva (Swagger) está en **`/api/usuarios/docs`**: haz login, copia el `access_token` y pégalo en el botón *Authorize*.
 
-### Cuentas de demostración
+### Cuentas de demostración del servicio
 
-La primera vez que arranca el servicio (con la tabla vacía) se crean estos datos de demostración:
-
-| Rol | Email | Contraseña |
-|---|---|---|
-| Cliente | `maria.perez@gmail.com`, `jose.rodriguez@gmail.com`, `ana.gomez@ujap.edu.ve` | `Cliente2026` |
-| Administrador | el de `ADMIN_EMAIL` | el de `ADMIN_PASSWORD` |
-
-El administrador se crea si no existe ninguno, con las variables `ADMIN_EMAIL` y `ADMIN_PASSWORD` de tu `.env`.
+La primera vez que arranca el servicio (con la tabla vacía) se crean los tres clientes de ejemplo. El administrador se crea si no existe ninguno, con las variables `ADMIN_EMAIL` y `ADMIN_PASSWORD` de tu `.env`.
 
 ## Parte 3 — Servicio de productos
 
@@ -324,21 +394,55 @@ Todas las rutas requieren `Authorization: Bearer <token>`. Los errores tienen el
 | DELETE | `/api/pedidos/{id}` | 🔒 admin | Eliminar |
 | GET | `/health` | público | Estado del servicio (el gateway lo publica como `/estado/pedidos`) |
 
-## Cómo probar lo publicado
+## Parte 6 — Frontend, pruebas y documentación
 
-**Requisito:** Docker Desktop (o Docker Engine + Compose v2).
+### Frontend
+
+Interfaz web en **HTML, CSS y JavaScript sin frameworks**, servida por Nginx. Solo habla con el gateway, así que no hay problemas de CORS.
+
+- **Inicio de sesión y registro** con el servicio de usuarios. La sesión es el token JWT, guardado en `sessionStorage` (se pierde al cerrar la pestaña). Cuando el token expira, vuelve al inicio de sesión con un aviso.
+- **Vistas según el rol:** el administrador ve *Usuarios*, *Productos*, *Pedidos* y *Actividad*; el cliente, *Productos* y *Pedidos*.
+- **Pedidos con carrito:** se agregan varios productos y se confirman de una vez. El cliente cancela sus pedidos pendientes; el administrador cambia el estado y elige el usuario del pedido.
+- La cabecera muestra el **estado de cada microservicio** (se consulta cada 10 s) y la vista de *Actividad* se actualiza cada 5 s.
+- Se puede abrir una vista directamente, por ejemplo `http://localhost/#pedidos`.
+- Todo el texto que llega de la API se escapa antes de mostrarlo, para evitar inyección de HTML.
+
+### Pruebas automáticas
+
+`tests/e2e.py` prueba el sistema completo **a través del gateway**, igual que lo usaría el frontend. Solo necesita Python 3.10 o superior (sin instalar nada) y el sistema levantado:
 
 ```bash
-git clone <url-del-repositorio>
-cd <carpeta-del-repositorio>
-cp .env.example .env            # en Windows: copy .env.example .env
-docker compose up -d --build
-docker compose ps
+python tests/e2e.py                        # contra http://localhost
+python tests/e2e.py http://tienda.ujap.test
 ```
 
-La primera vez tarda varios minutos (se descargan imágenes y se compilan los servicios, sobre todo el de Java). Resultado esperado: `postgres`, `mongodb` y los cuatro microservicios en estado `healthy`, y `gateway` en `running`. El servicio de pedidos es el último en estar listo.
+Cubre **77 comprobaciones**:
 
-Probar la autenticación (parte 2) a través del gateway:
+- Estado de los servicios, frontend y que los puertos internos (8001 a 8004) estén cerrados.
+- Inicio de sesión, registro y tokens alterados.
+- Permisos de cada rol y bloqueo de los endpoints internos.
+- CRUD de los 4 servicios.
+- Pedidos con varios productos y compensación del stock cuando falla uno.
+- Cancelaciones (el stock se devuelve una sola vez) y 8 compras simultáneas.
+- Eventos en el servicio de actividad.
+
+Lee `ADMIN_EMAIL` y `ADMIN_PASSWORD` de tu `.env` (o usa los valores por defecto) y, al terminar, **borra los datos que creó**. Como comprueba que los puertos internos estén cerrados, no debe ejecutarse con el modo de depuración activo.
+
+### Modo depuración
+
+Para llamar directamente a cada microservicio, `docker-compose.debug.yml` publica sus puertos (8001 usuarios, 8002 productos, 8003 pedidos, 8004 actividad):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d
+```
+
+En uso normal **no** se usa: todo el tráfico entra por el gateway.
+
+## Probar la API con curl
+
+Reemplaza `<token>`, `<token-admin>`, `<id1>`, `<id2>` e `<id-pedido>` por los valores que obtengas.
+
+Autenticación (parte 2):
 
 ```bash
 # 1. Iniciar sesión como cliente de demostración → devuelve el access_token
@@ -352,7 +456,7 @@ curl -s http://localhost/api/auth/yo -H "Authorization: Bearer <token>"
 curl -s -i http://localhost/api/usuarios -H "Authorization: Bearer <token>"
 ```
 
-Probar el catálogo (parte 3):
+Catálogo (parte 3):
 
 ```bash
 # El catálogo es público (no necesita token)
@@ -369,10 +473,10 @@ curl -s -X POST http://localhost/api/productos -H "Authorization: Bearer <token-
      -d '{"nombre": "Webcam Logitech C920", "precio": 59.9, "stock": 10, "categoria": "Accesorios"}'
 
 # Los endpoints internos están bloqueados desde fuera → 403
-curl -s -i -X POST http://localhost/api/productos/<id>/reservar
+curl -s -i -X POST http://localhost/api/productos/<id1>/reservar
 ```
 
-Probar los pedidos (parte 5), con el token del cliente y dos `id` del catálogo:
+Pedidos (parte 5), con el token del cliente y dos `id` del catálogo:
 
 ```bash
 # Crear un pedido con dos productos → 201, estado PENDIENTE
@@ -400,7 +504,7 @@ curl -s -X PATCH http://localhost/api/pedidos/<id-pedido>/estado -H "Authorizati
      -H "Content-Type: application/json" -d '{"estado": "ENVIADO"}'
 ```
 
-Probar el historial de actividad (parte 4). Todas las acciones anteriores generaron eventos:
+Historial de actividad (parte 4):
 
 ```bash
 # El administrador consulta los últimos eventos y el resumen por servicio
@@ -417,30 +521,12 @@ curl -s -i http://localhost/api/eventos -H "Authorization: Bearer <token-cliente
 curl -s -i -X POST http://localhost/api/eventos
 ```
 
-Para comprobar las bases de datos:
+Bases de datos:
 
 ```bash
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select id, usuario_nombre, total, estado from pedidos;"'
 docker compose exec mongodb sh -c 'mongosh -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --quiet tienda --eval "db.productos.countDocuments(); db.eventos.countDocuments()"'
 ```
-
-> Como todavía no existe el frontend, el gateway responde `502 Bad Gateway` en `/`. Es lo esperado en esta etapa: la API completa ya funciona a través del gateway.
-
-Para detener todo:
-
-```bash
-docker compose down        # conserva los datos
-docker compose down -v     # también borra los datos
-```
-
-Si el puerto 80 de tu equipo está ocupado, cambia `GATEWAY_PORT` en `.env` (por ejemplo, `8080`) y usa `http://localhost:8080`.
-
-### Nombre local `tienda.ujap.test`
-
-Para abrir el sistema como `http://tienda.ujap.test` hay que agregar el nombre al archivo `hosts` una sola vez:
-
-- **Windows:** clic derecho en `configurar-dominio.ps1` → *Ejecutar con PowerShell* (pide permiso de administrador).
-- **Linux / macOS:** `echo "127.0.0.1 tienda.ujap.test" | sudo tee -a /etc/hosts`
 
 ## Variables de entorno
 
@@ -463,11 +549,12 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 ## Decisiones técnicas
 
+- **Un contenedor por componente** (8 en total) y un `Dockerfile` por servicio. Java y Go usan compilación en dos etapas: la imagen final solo lleva el JRE o el binario.
 - **Solo el gateway publica un puerto.** Las bases de datos y los microservicios no son accesibles desde fuera de Docker.
-- **Dos redes de Docker:** `backend` (bases de datos y microservicios) y `frontend` (gateway, frontend y microservicios). El gateway no puede llegar a las bases de datos.
-- **Healthchecks:** cada microservicio espera a que su base de datos esté `healthy` antes de arrancar (`depends_on: condition: service_healthy`).
+- **Dos redes de Docker:** `backend` (bases de datos y microservicios) y `frontend` (gateway, frontend y microservicios). El gateway y el frontend no pueden llegar a las bases de datos.
+- **Healthchecks:** cada microservicio espera a que su base de datos esté `healthy` antes de arrancar (`depends_on: condition: service_healthy`), y además reintenta la conexión.
 - **Volúmenes** `pgdata` y `mongodata`: los datos persisten entre reinicios.
-- **Un solo origen para el navegador:** el frontend solo habla con el gateway, así que no hay problemas de CORS ni de puertos distintos.
+- **API Gateway:** el frontend solo habla con un origen, así que no hay problemas de CORS ni de puertos distintos.
 - **JWT con secreto compartido:** cada microservicio valida los tokens por su cuenta, sin depender del servicio de usuarios en cada petición.
 - **Operaciones de stock atómicas e idempotentes:** el estado se protege en la propia base de datos, no en el código que la llama.
 - **Registro de eventos desacoplado:** los servicios envían los eventos sin esperar la respuesta y, si el servicio de actividad falla, lo ignoran; una caída del historial no interrumpe las ventas.

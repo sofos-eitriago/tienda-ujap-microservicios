@@ -1,14 +1,13 @@
 # Proyecto Final LPR07304 — Tienda en línea con microservicios
 #
-# PARTE 5 DE 6 — Infraestructura base + los 4 microservicios (usuarios, productos, actividad y pedidos).
-# Solo falta el frontend, que se agrega a este archivo en la última parte.
+# Levantar todo el sistema con un solo comando:
+#   docker compose up --build
 #
-# Levantar lo publicado hasta ahora:
-#   docker compose up -d --build
+# Abrir: http://tienda.ujap.test  (o http://localhost)
 #
 # Las variables ${...} se leen del archivo .env (si no existe, se usan los valores por defecto).
 # Solo el gateway publica un puerto: los microservicios y las bases de datos no son accesibles
-# desde fuera de Docker.
+# desde fuera de Docker. Para depurar con puertos directos ver docker-compose.debug.yml.
 
 name: tienda-ujap
 
@@ -145,11 +144,17 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  # ───────────────────────────── API Gateway ─────────────────────────────
+  # ───────────────────── Frontend + API Gateway ─────────────────────
+  frontend:                         # HTML/CSS/JS servido por Nginx
+    build: ./frontend
+    networks: [frontend]
+    restart: unless-stopped
+
   gateway:                          # Nginx: único punto de entrada al sistema
     build: ./gateway
     ports: ["${GATEWAY_PORT:-80}:80"]
     depends_on:
+      - frontend
       - servicio-usuarios
       - servicio-productos
       - servicio-pedidos
@@ -157,7 +162,7 @@ services:
     networks: [frontend]
     restart: unless-stopped
 
-# Las bases de datos solo están en la red "backend": el gateway no puede llegar a ellas.
+# Las bases de datos solo están en la red "backend": el gateway y el frontend no pueden llegar a ellas.
 networks:
   backend:
   frontend:

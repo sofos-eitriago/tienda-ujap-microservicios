@@ -1,0 +1,13 @@
+# Solo para depurar: publica el puerto de cada microservicio en tu máquina.
+#   docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d
+#
+# En uso normal NO se usa: todo el tráfico entra por el gateway.
+services:
+  servicio-usuarios:
+    ports: ["8001:8000"]
+  servicio-productos:
+    ports: ["8002:3000"]
+  servicio-pedidos:
+    ports: ["8003:8080"]
+  servicio-actividad:
+    ports: ["8004:8080"]

@@ -1,0 +1,475 @@
+// Frontend de la Tienda UJAP.
+// Todas las peticiones van al API Gateway (mismo origen), que las reparte a cada microservicio.
+// La sesión es un token JWT emitido por el servicio de usuarios; se envía en cada petición.
+
+const SERVICIOS = [
+  { id: 'usuarios', nombre: 'Usuarios', tecnologia: 'FastAPI' },
+  { id: 'productos', nombre: 'Productos', tecnologia: 'Express' },
+  { id: 'pedidos', nombre: 'Pedidos', tecnologia: 'Spring Boot' },
+  { id: 'actividad', nombre: 'Actividad', tecnologia: 'Go' },
+];
+const VISTAS_POR_ROL = {
+  admin: ['usuarios', 'productos', 'pedidos', 'actividad'],
+  cliente: ['productos', 'pedidos'],
+};
+const ESTADOS_ELEGIBLES = ['PENDIENTE', 'ENVIADO', 'ENTREGADO', 'CANCELADO'];
+const ESTADOS_FINALES = ['CANCELADO', 'RECHAZADO', 'PROCESANDO'];
+
+const moneda = new Intl.NumberFormat('es-VE', { style: 'currency', currency: 'USD' });
+const fechaHora = new Intl.DateTimeFormat('es-VE', { dateStyle: 'short', timeStyle: 'medium' });
+
+const $ = (selector) => document.querySelector(selector);
+
+let sesion = leerSesion();
+let usuarios = [];
+let productos = [];
+let carrito = [];
+let vistaActual = null;
+
+// ───────────── Utilidades ─────────────
+
+function esc(valor) {
+  const reemplazos = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  return String(valor ?? '').replace(/[&<>"']/g, (c) => reemplazos[c]);
+}
+
+function leerSesion() {
+  try {
+    return JSON.parse(sessionStorage.getItem('sesion')) || null;
+  } catch {
+    return null;
+  }
+}
+
+function guardarSesion(datos) {
+  sesion = datos;
+  try {
+    if (datos) sessionStorage.setItem('sesion', JSON.stringify(datos));
+    else sessionStorage.removeItem('sesion');
+  } catch {
+    // sin almacenamiento disponible: la sesión dura mientras la página esté abierta
+  }
+}
+
+const esAdmin = () => sesion?.usuario.rol === 'admin';
+
+async function api(ruta, { metodo = 'GET', cuerpo } = {}) {
+  const opciones = { method: metodo, headers: {} };
+  if (sesion) opciones.headers.Authorization = `Bearer ${sesion.token}`;
+  if (cuerpo !== undefined) {
+    opciones.headers['Content-Type'] = 'application/json';
+    opciones.body = JSON.stringify(cuerpo);
+  }
+  const respuesta = await fetch(ruta, opciones);
+  if (respuesta.status === 204) return null;
+  const datos = await respuesta.json().catch(() => null);
+  if (respuesta.status === 401 && sesion && !ruta.startsWith('/api/auth/')) {
+    cerrarSesion('Tu sesión expiró, vuelve a iniciar sesión');
+    throw new Error('Sesión expirada');
+  }
+  if (!respuesta.ok) throw new Error(mensajeDeError(datos, respuesta.status));
+  return datos;
+}
+
+// Todos los servicios responden errores como {"detail": "..."}; FastAPI usa una lista en validaciones
+function mensajeDeError(datos, status) {
+  const detalle = datos?.detail;
+  if (Array.isArray(detalle)) return detalle.map((e) => `${e.loc?.at(-1) ?? ''}: ${e.msg}`).join(' · ');
+  if (typeof detalle === 'string') return detalle;
+  if ([502, 503, 504].includes(status)) return 'El microservicio no está disponible en este momento';
+  return `Error ${status}`;
+}
+
+let temporizadorAviso;
+function avisar(texto, tipo = 'ok') {
+  const aviso = $('#aviso');
+  aviso.textContent = texto;
+  aviso.className = `aviso visible ${tipo}`;
+  clearTimeout(temporizadorAviso);
+  temporizadorAviso = setTimeout(() => aviso.classList.remove('visible'), 4000);
+}
+
+function filaVacia(columnas, texto, esError = false) {
+  return `<tr><td colspan="${columnas}" class="vacio ${esError ? 'error-carga' : ''}">${esc(texto)}</td></tr>`;
+}
+
+// Lee un formulario y descarta los campos vacíos
+function leerFormulario(form) {
+  const datos = {};
+  for (const [clave, valor] of new FormData(form)) {
+    const texto = String(valor).trim();
+    if (texto !== '') datos[clave] = texto;
+  }
+  return datos;
+}
+
+// Envía un formulario deshabilitando el botón mientras espera la respuesta
+function alEnviar(form, accion) {
+  form.addEventListener('submit', async (evento) => {
+    evento.preventDefault();
+    const boton = form.querySelector('button[type="submit"]');
+    boton.disabled = true;
+    try {
+      await accion(leerFormulario(form));
+    } catch (error) {
+      if (error.message !== 'Sesión expirada') avisar(error.message, 'error');
+    } finally {
+      boton.disabled = false;
+    }
+  });
+}
+
+// ───────────── Sesión ─────────────
+
+function mostrarAcceso(formulario) {
+  document.querySelectorAll('.acceso-pestana').forEach((b) => b.classList.toggle('activa', b.dataset.acceso === formulario));
+  $('#form-login').hidden = formulario !== 'login';
+  $('#form-registro').hidden = formulario !== 'registro';
+}
+
+function iniciarSesion(respuesta) {
+  guardarSesion({ token: respuesta.access_token, usuario: respuesta.usuario });
+  avisar(`Hola, ${respuesta.usuario.nombre}`);
+  mostrarApp();
+}
+
+function cerrarSesion(mensaje) {
+  guardarSesion(null);
+  carrito = [];
+  $('#app').hidden = true;
+  $('#sesion').hidden = true;
+  $('#pantalla-acceso').hidden = false;
+  document.body.className = '';
+  history.replaceState(null, '', location.pathname);
+  if (mensaje) avisar(mensaje, 'error');
+}
+
+function mostrarApp() {
+  const { usuario } = sesion;
+  document.body.className = `rol-${usuario.rol}`;
+  $('#pantalla-acceso').hidden = true;
+  $('#app').hidden = false;
+  $('#sesion').hidden = false;
+  $('#sesion-nombre').textContent = usuario.nombre;
+  $('#sesion-rol').textContent = usuario.rol === 'admin' ? 'Administrador' : 'Cliente';
+  $('#titulo-pedidos').textContent = esAdmin() ? 'Todos los pedidos' : 'Mis pedidos';
+
+  const permitidas = VISTAS_POR_ROL[usuario.rol] ?? VISTAS_POR_ROL.cliente;
+  document.querySelectorAll('.pestana').forEach((b) => { b.hidden = !permitidas.includes(b.dataset.vista); });
+
+  const pedida = location.hash.slice(1);
+  mostrarVista(permitidas.includes(pedida) ? pedida : permitidas[0]);
+}
+
+document.querySelectorAll('.acceso-pestana').forEach((b) => b.addEventListener('click', () => mostrarAcceso(b.dataset.acceso)));
+
+document.querySelectorAll('.demo-cuenta').forEach((b) => b.addEventListener('click', () => {
+  $('#form-login [name="email"]').value = b.dataset.email;
+  // La cuenta de administrador no trae contraseña: es la de ADMIN_PASSWORD en el .env de quien despliega
+  const campoClave = $('#form-login [name="password"]');
+  campoClave.value = b.dataset.password ?? '';
+  if (!campoClave.value) campoClave.focus();
+}));
+
+alEnviar($('#form-login'), async (datos) => {
+  iniciarSesion(await api('/api/auth/login', { metodo: 'POST', cuerpo: datos }));
+  $('#form-login').reset();
+});
+
+alEnviar($('#form-registro'), async (datos) => {
+  iniciarSesion(await api('/api/auth/registro', { metodo: 'POST', cuerpo: datos }));
+  $('#form-registro').reset();
+});
+
+$('#cerrar-sesion').addEventListener('click', () => cerrarSesion());
+
+// ───────────── Pestañas ─────────────
+
+const cargadores = {
+  usuarios: cargarUsuarios,
+  productos: cargarProductos,
+  pedidos: cargarPedidos,
+  actividad: cargarActividad,
+};
+
+function mostrarVista(vista) {
+  vistaActual = vista;
+  history.replaceState(null, '', `#${vista}`);
+  document.querySelectorAll('.pestana').forEach((b) => b.classList.toggle('activa', b.dataset.vista === vista));
+  document.querySelectorAll('.vista').forEach((s) => s.classList.toggle('activa', s.id === `vista-${vista}`));
+  cargadores[vista]();
+}
+
+document.querySelectorAll('.pestana').forEach((boton) => {
+  boton.addEventListener('click', () => mostrarVista(boton.dataset.vista));
+});
+
+// ───────────── Estado de los microservicios ─────────────
+
+async function revisarEstado() {
+  const resultados = await Promise.all(
+    SERVICIOS.map((s) => fetch(`/estado/${s.id}`, { cache: 'no-store' }).then((r) => r.ok).catch(() => false))
+  );
+  $('#estado-servicios').innerHTML = SERVICIOS.map((s, i) => `
+    <li class="${resultados[i] ? 'en-linea' : 'caido'}" title="${resultados[i] ? 'En línea' : 'Sin respuesta'}">
+      <span class="punto"></span>${s.nombre} <small>${s.tecnologia}</small>
+    </li>`).join('');
+}
+
+// ───────────── Usuarios (Python / FastAPI / PostgreSQL) — solo admin ─────────────
+
+async function cargarUsuarios() {
+  const cuerpo = $('#tabla-usuarios');
+  try {
+    usuarios = await api('/api/usuarios');
+    cuerpo.innerHTML = usuarios.length
+      ? usuarios.map((u) => `
+          <tr>
+            <td>${u.id}</td>
+            <td>${esc(u.nombre)}</td>
+            <td>${esc(u.email)}</td>
+            <td>${esc(u.telefono || '—')}</td>
+            <td>${esc(u.ciudad || '—')}</td>
+            <td><span class="insignia rol-${esc(u.rol)}">${u.rol === 'admin' ? 'Admin' : 'Cliente'}</span></td>
+            <td>${u.id === sesion.usuario.id ? '' : `<button class="boton-borrar" data-id="${u.id}">Eliminar</button>`}</td>
+          </tr>`).join('')
+      : filaVacia(7, 'No hay usuarios registrados');
+  } catch (error) {
+    cuerpo.innerHTML = filaVacia(7, error.message, true);
+  }
+}
+
+alEnviar($('#form-usuario'), async (datos) => {
+  const usuario = await api('/api/usuarios', { metodo: 'POST', cuerpo: datos });
+  $('#form-usuario').reset();
+  avisar(`Usuario "${usuario.nombre}" creado`);
+  cargarUsuarios();
+});
+
+$('#tabla-usuarios').addEventListener('click', async (evento) => {
+  const boton = evento.target.closest('.boton-borrar');
+  if (!boton || !confirm('¿Eliminar este usuario?')) return;
+  try {
+    await api(`/api/usuarios/${boton.dataset.id}`, { metodo: 'DELETE' });
+    avisar('Usuario eliminado');
+    cargarUsuarios();
+  } catch (error) {
+    avisar(error.message, 'error');
+  }
+});
+
+// ───────────── Productos (Node.js / Express / MongoDB) ─────────────
+
+async function cargarProductos() {
+  const cuerpo = $('#tabla-productos');
+  try {
+    productos = await api('/api/productos');
+    cuerpo.innerHTML = productos.length
+      ? productos.map((p) => `
+          <tr>
+            <td>${esc(p.nombre)}<small>${esc(p.descripcion)}</small></td>
+            <td>${esc(p.categoria)}</td>
+            <td class="num">${moneda.format(p.precio)}</td>
+            <td class="num ${p.stock <= 5 ? 'stock-bajo' : ''}">${p.stock}</td>
+            <td class="solo-admin"><button class="boton-borrar" data-id="${esc(p.id)}">Eliminar</button></td>
+          </tr>`).join('')
+      : filaVacia(5, 'No hay productos en el catálogo');
+  } catch (error) {
+    cuerpo.innerHTML = filaVacia(5, error.message, true);
+  }
+}
+
+alEnviar($('#form-producto'), async (datos) => {
+  const producto = await api('/api/productos', {
+    metodo: 'POST',
+    cuerpo: { ...datos, precio: Number(datos.precio), stock: Number(datos.stock ?? 0) },
+  });
+  $('#form-producto').reset();
+  avisar(`Producto "${producto.nombre}" creado`);
+  cargarProductos();
+});
+
+$('#tabla-productos').addEventListener('click', async (evento) => {
+  const boton = evento.target.closest('.boton-borrar');
+  if (!boton || !confirm('¿Eliminar este producto?')) return;
+  try {
+    await api(`/api/productos/${boton.dataset.id}`, { metodo: 'DELETE' });
+    avisar('Producto eliminado');
+    cargarProductos();
+  } catch (error) {
+    avisar(error.message, 'error');
+  }
+});
+
+// ───────────── Pedidos (Java / Spring Boot / PostgreSQL) ─────────────
+
+function llenarSelect(select, elementos, texto, valor, vacio) {
+  const actual = select.value;
+  select.innerHTML = elementos.length
+    ? elementos.map((e) => `<option value="${esc(valor(e))}">${esc(texto(e))}</option>`).join('')
+    : `<option value="">${esc(vacio)}</option>`;
+  if (elementos.some((e) => String(valor(e)) === actual)) select.value = actual;
+}
+
+function dibujarCarrito() {
+  $('#carrito').innerHTML = carrito.length
+    ? carrito.map((item, i) => `
+        <li>
+          <span>${item.cantidad} × ${esc(item.nombre)}</span>
+          <span class="num">${moneda.format(item.precio * item.cantidad)}</span>
+          <button type="button" class="quitar" data-indice="${i}" title="Quitar">✕</button>
+        </li>`).join('')
+    : '<li class="vacio">Agrega uno o más productos al pedido</li>';
+  $('#total-carrito').textContent = moneda.format(carrito.reduce((suma, i) => suma + i.precio * i.cantidad, 0));
+}
+
+$('#agregar-item').addEventListener('click', () => {
+  const producto = productos.find((p) => p.id === $('#pedido-producto').value);
+  const cantidad = Number($('#pedido-cantidad').value);
+  if (!producto) return avisar('Elige un producto', 'error');
+  if (!Number.isInteger(cantidad) || cantidad < 1) return avisar('La cantidad debe ser un entero mayor que 0', 'error');
+
+  const existente = carrito.find((i) => i.productoId === producto.id);
+  if (existente) existente.cantidad += cantidad;
+  else carrito.push({ productoId: producto.id, nombre: producto.nombre, precio: producto.precio, cantidad });
+  $('#pedido-cantidad').value = 1;
+  dibujarCarrito();
+});
+
+$('#carrito').addEventListener('click', (evento) => {
+  const boton = evento.target.closest('.quitar');
+  if (!boton) return;
+  carrito.splice(Number(boton.dataset.indice), 1);
+  dibujarCarrito();
+});
+
+function celdaEstado(p) {
+  if (esAdmin() && !ESTADOS_FINALES.includes(p.estado)) {
+    return `<select class="selector-estado estado-${p.estado}" data-id="${p.id}">
+      ${ESTADOS_ELEGIBLES.map((e) => `<option ${e === p.estado ? 'selected' : ''}>${e}</option>`).join('')}
+    </select>`;
+  }
+  return `<span class="insignia estado-${p.estado}">${p.estado}</span>`;
+}
+
+function celdaAcciones(p) {
+  if (esAdmin()) return `<button class="boton-borrar" data-id="${p.id}">Eliminar</button>`;
+  if (p.estado === 'PENDIENTE') return `<button class="boton-borrar" data-cancelar="${p.id}">Cancelar</button>`;
+  return '';
+}
+
+async function cargarPedidos() {
+  const cuerpo = $('#tabla-pedidos');
+  const [resUsuarios, resProductos, resPedidos] = await Promise.allSettled([
+    esAdmin() ? api('/api/usuarios') : Promise.resolve([]),
+    api('/api/productos'),
+    api('/api/pedidos'),
+  ]);
+  if (resUsuarios.status === 'fulfilled') usuarios = resUsuarios.value;
+  if (resProductos.status === 'fulfilled') productos = resProductos.value;
+
+  llenarSelect($('#pedido-usuario'), usuarios, (u) => `${u.nombre} (#${u.id})`, (u) => u.id, 'No hay usuarios');
+  llenarSelect(
+    $('#pedido-producto'),
+    productos,
+    (p) => `${p.nombre} — ${moneda.format(p.precio)} (${p.stock} disp.)`,
+    (p) => p.id,
+    'No hay productos'
+  );
+  dibujarCarrito();
+
+  if (resPedidos.status === 'rejected') {
+    cuerpo.innerHTML = filaVacia(7, resPedidos.reason.message, true);
+    return;
+  }
+  const pedidos = resPedidos.value;
+  cuerpo.innerHTML = pedidos.length
+    ? pedidos.map((p) => `
+        <tr>
+          <td>${p.id}</td>
+          <td>${fechaHora.format(new Date(p.fecha))}</td>
+          <td>${esc(p.usuarioNombre)}</td>
+          <td><ul class="items">${p.items.map((i) => `
+            <li>${i.cantidad} × ${esc(i.productoNombre)} <small>${moneda.format(i.subtotal)}</small></li>`).join('')}
+          </ul></td>
+          <td class="num">${moneda.format(p.total)}</td>
+          <td>${celdaEstado(p)}</td>
+          <td>${celdaAcciones(p)}</td>
+        </tr>`).join('')
+    : filaVacia(7, esAdmin() ? 'Todavía no hay pedidos' : 'Todavía no has hecho pedidos');
+}
+
+alEnviar($('#form-pedido'), async (datos) => {
+  if (!carrito.length) throw new Error('Agrega al menos un producto al pedido');
+  const cuerpo = { items: carrito.map(({ productoId, cantidad }) => ({ productoId, cantidad })) };
+  if (esAdmin()) cuerpo.usuarioId = Number(datos.usuarioId);
+  const pedido = await api('/api/pedidos', { metodo: 'POST', cuerpo });
+  carrito = [];
+  avisar(`Pedido #${pedido.id} creado — total ${moneda.format(pedido.total)}`);
+  cargarPedidos();
+});
+
+async function cambiarEstado(id, estado) {
+  try {
+    const pedido = await api(`/api/pedidos/${id}/estado`, { metodo: 'PATCH', cuerpo: { estado } });
+    avisar(`Pedido #${pedido.id}: ${pedido.estado}${pedido.estado === 'CANCELADO' ? ' (stock devuelto)' : ''}`);
+  } catch (error) {
+    avisar(error.message, 'error');
+  }
+  cargarPedidos();
+}
+
+$('#tabla-pedidos').addEventListener('change', (evento) => {
+  const select = evento.target.closest('.selector-estado');
+  if (select) cambiarEstado(select.dataset.id, select.value);
+});
+
+$('#tabla-pedidos').addEventListener('click', async (evento) => {
+  const cancelar = evento.target.closest('[data-cancelar]');
+  if (cancelar) {
+    if (confirm('¿Cancelar este pedido? El stock se devolverá al catálogo.')) cambiarEstado(cancelar.dataset.cancelar, 'CANCELADO');
+    return;
+  }
+  const boton = evento.target.closest('.boton-borrar');
+  if (!boton || !confirm('¿Eliminar este pedido del historial?')) return;
+  try {
+    await api(`/api/pedidos/${boton.dataset.id}`, { metodo: 'DELETE' });
+    avisar('Pedido eliminado');
+    cargarPedidos();
+  } catch (error) {
+    avisar(error.message, 'error');
+  }
+});
+
+// ───────────── Actividad (Go / MongoDB) — solo admin ─────────────
+
+async function cargarActividad() {
+  try {
+    const [resumen, eventos] = await Promise.all([api('/api/eventos/resumen'), api('/api/eventos?limite=40')]);
+    $('#resumen-actividad').innerHTML =
+      `<div class="cifra"><strong>${resumen.total}</strong><span>eventos en total</span></div>` +
+      (resumen.por_servicio || []).map((f) => `
+        <div class="cifra servicio-${esc(f.servicio)}"><strong>${f.total}</strong><span>${esc(f.servicio)}</span></div>`).join('');
+
+    $('#lista-eventos').innerHTML = eventos.length
+      ? eventos.map((e) => `
+          <li>
+            <span class="etiqueta servicio-${esc(e.servicio)}">${esc(e.servicio)}</span>
+            <div><strong>${esc(e.tipo)}</strong><p>${esc(e.mensaje)}</p></div>
+            <time datetime="${esc(e.fecha)}">${fechaHora.format(new Date(e.fecha))}</time>
+          </li>`).join('')
+      : '<li class="vacio">Aún no hay eventos. Crea un usuario, un producto o un pedido.</li>';
+  } catch (error) {
+    $('#resumen-actividad').innerHTML = '';
+    $('#lista-eventos').innerHTML = `<li class="vacio error-carga">${esc(error.message)}</li>`;
+  }
+}
+
+// ───────────── Inicio ─────────────
+
+revisarEstado();
+setInterval(revisarEstado, 10000);
+setInterval(() => { if (sesion && vistaActual === 'actividad') cargarActividad(); }, 5000);
+
+if (sesion) mostrarApp();
+else cerrarSesion();
