@@ -3,7 +3,8 @@
 # Levantar todo el sistema con un solo comando:
 #   docker compose up --build
 #
-# Abrir: http://tienda.ujap.test  (o http://localhost)
+# Abrir: http://tienda.ujap.test
+# (la primera vez hay que agregar ese nombre al archivo hosts: ver el README o configurar-dominio.ps1)
 #
 # Las variables ${...} se leen del archivo .env (si no existe, se usan los valores por defecto).
 # Solo el gateway publica un puerto: los microservicios y las bases de datos no son accesibles

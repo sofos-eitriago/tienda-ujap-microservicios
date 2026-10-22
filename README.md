@@ -155,18 +155,22 @@ La primera vez tarda varios minutos (se descargan imágenes y se compilan los se
 
 ### Abrir el sistema
 
-- **http://localhost** — funciona siempre, sin configurar nada.
-- **http://tienda.ujap.test** — requiere agregar el nombre al archivo `hosts` una sola vez:
-  - **Windows:** clic derecho en `configurar-dominio.ps1` → *Ejecutar con PowerShell* (pide permiso de administrador).
-  - **Linux / macOS:** `echo "127.0.0.1 tienda.ujap.test" | sudo tee -a /etc/hosts`
+El sistema se abre en **http://tienda.ujap.test**. Ese nombre solo existe en tu equipo: hay que agregarlo al archivo `hosts` **una sola vez**, indicando que apunta a tu propia máquina (`127.0.0.1`):
 
-Si el puerto 80 de tu equipo está ocupado, cambia `GATEWAY_PORT` en `.env` (por ejemplo, `8080`) y abre `http://localhost:8080`.
+- **Windows:** clic derecho en `configurar-dominio.ps1` → *Ejecutar con PowerShell* (pide permiso de administrador).
+- **Linux / macOS:** `echo "127.0.0.1 tienda.ujap.test" | sudo tee -a /etc/hosts`
+
+Después abre http://tienda.ujap.test en el navegador. Todos los ejemplos de este documento usan esa dirección.
+
+Si el puerto 80 de tu equipo está ocupado, cambia `GATEWAY_PORT` en `.env` (por ejemplo, `8080`) y abre `http://tienda.ujap.test:8080` (y usa ese puerto en los ejemplos).
+
+> **Alternativa sin tocar `hosts`:** el gateway también responde en `http://localhost`, pero la dirección oficial del proyecto es `tienda.ujap.test`.
 
 | Qué | Dirección |
 |---|---|
-| **Aplicación** | http://localhost |
-| Swagger del servicio de usuarios | http://localhost/api/usuarios/docs |
-| Catálogo (JSON, público) | http://localhost/api/productos |
+| **Aplicación** | http://tienda.ujap.test |
+| Swagger del servicio de usuarios | http://tienda.ujap.test/api/usuarios/docs |
+| Catálogo (JSON, público) | http://tienda.ujap.test/api/productos |
 
 ### Cuentas de demostración
 
@@ -404,7 +408,7 @@ Interfaz web en **HTML, CSS y JavaScript sin frameworks**, servida por Nginx. So
 - **Vistas según el rol:** el administrador ve *Usuarios*, *Productos*, *Pedidos* y *Actividad*; el cliente, *Productos* y *Pedidos*.
 - **Pedidos con carrito:** se agregan varios productos y se confirman de una vez. El cliente cancela sus pedidos pendientes; el administrador cambia el estado y elige el usuario del pedido.
 - La cabecera muestra el **estado de cada microservicio** (se consulta cada 10 s) y la vista de *Actividad* se actualiza cada 5 s.
-- Se puede abrir una vista directamente, por ejemplo `http://localhost/#pedidos`.
+- Se puede abrir una vista directamente, por ejemplo `http://tienda.ujap.test/#pedidos`.
 - Todo el texto que llega de la API se escapa antes de mostrarlo, para evitar inyección de HTML.
 
 ### Pruebas automáticas
@@ -412,8 +416,8 @@ Interfaz web en **HTML, CSS y JavaScript sin frameworks**, servida por Nginx. So
 `tests/e2e.py` prueba el sistema completo **a través del gateway**, igual que lo usaría el frontend. Solo necesita Python 3.10 o superior (sin instalar nada) y el sistema levantado:
 
 ```bash
-python tests/e2e.py                        # contra http://localhost
-python tests/e2e.py http://tienda.ujap.test
+python tests/e2e.py                        # contra http://tienda.ujap.test
+python tests/e2e.py http://localhost       # otra dirección, si no agregaste el nombre a hosts
 ```
 
 Cubre **77 comprobaciones**:
@@ -446,61 +450,61 @@ Autenticación (parte 2):
 
 ```bash
 # 1. Iniciar sesión como cliente de demostración → devuelve el access_token
-curl -s -X POST http://localhost/api/auth/login -H "Content-Type: application/json" \
+curl -s -X POST http://tienda.ujap.test/api/auth/login -H "Content-Type: application/json" \
      -d '{"email": "maria.perez@gmail.com", "password": "Cliente2026"}'
 
 # 2. Con ese token: tus datos
-curl -s http://localhost/api/auth/yo -H "Authorization: Bearer <token>"
+curl -s http://tienda.ujap.test/api/auth/yo -H "Authorization: Bearer <token>"
 
 # 3. Un cliente no puede listar usuarios → 403
-curl -s -i http://localhost/api/usuarios -H "Authorization: Bearer <token>"
+curl -s -i http://tienda.ujap.test/api/usuarios -H "Authorization: Bearer <token>"
 ```
 
 Catálogo (parte 3):
 
 ```bash
 # El catálogo es público (no necesita token)
-curl -s http://localhost/api/productos
-curl -s "http://localhost/api/productos?q=laptop"
+curl -s http://tienda.ujap.test/api/productos
+curl -s "http://tienda.ujap.test/api/productos?q=laptop"
 
 # Crear un producto sin token → 401
-curl -s -i -X POST http://localhost/api/productos -H "Content-Type: application/json" \
+curl -s -i -X POST http://tienda.ujap.test/api/productos -H "Content-Type: application/json" \
      -d '{"nombre": "Webcam Logitech C920", "precio": 59.9, "stock": 10}'
 
 # Con el token del administrador (inicia sesión con ADMIN_EMAIL y ADMIN_PASSWORD de tu .env) → 201
-curl -s -X POST http://localhost/api/productos -H "Authorization: Bearer <token-admin>" \
+curl -s -X POST http://tienda.ujap.test/api/productos -H "Authorization: Bearer <token-admin>" \
      -H "Content-Type: application/json" \
      -d '{"nombre": "Webcam Logitech C920", "precio": 59.9, "stock": 10, "categoria": "Accesorios"}'
 
 # Los endpoints internos están bloqueados desde fuera → 403
-curl -s -i -X POST http://localhost/api/productos/<id1>/reservar
+curl -s -i -X POST http://tienda.ujap.test/api/productos/<id1>/reservar
 ```
 
 Pedidos (parte 5), con el token del cliente y dos `id` del catálogo:
 
 ```bash
 # Crear un pedido con dos productos → 201, estado PENDIENTE
-curl -s -X POST http://localhost/api/pedidos -H "Authorization: Bearer <token>" \
+curl -s -X POST http://tienda.ujap.test/api/pedidos -H "Authorization: Bearer <token>" \
      -H "Content-Type: application/json" \
      -d '{"items": [{"productoId": "<id1>", "cantidad": 2}, {"productoId": "<id2>", "cantidad": 1}]}'
 
 # El stock bajó en el catálogo
-curl -s http://localhost/api/productos
+curl -s http://tienda.ujap.test/api/productos
 
 # Mis pedidos
-curl -s http://localhost/api/pedidos -H "Authorization: Bearer <token>"
+curl -s http://tienda.ujap.test/api/pedidos -H "Authorization: Bearer <token>"
 
 # Pedir más de lo que hay (500 unidades) → 409 y no queda nada reservado a medias
-curl -s -i -X POST http://localhost/api/pedidos -H "Authorization: Bearer <token>" \
+curl -s -i -X POST http://tienda.ujap.test/api/pedidos -H "Authorization: Bearer <token>" \
      -H "Content-Type: application/json" -d '{"items": [{"productoId": "<id1>", "cantidad": 500}]}'
 
 # Cancelar el pedido → el stock vuelve al catálogo
-curl -s -X PATCH http://localhost/api/pedidos/<id-pedido>/estado -H "Authorization: Bearer <token>" \
+curl -s -X PATCH http://tienda.ujap.test/api/pedidos/<id-pedido>/estado -H "Authorization: Bearer <token>" \
      -H "Content-Type: application/json" -d '{"estado": "CANCELADO"}'
 
 # El administrador ve todos los pedidos y cambia su estado
-curl -s http://localhost/api/pedidos -H "Authorization: Bearer <token-admin>"
-curl -s -X PATCH http://localhost/api/pedidos/<id-pedido>/estado -H "Authorization: Bearer <token-admin>" \
+curl -s http://tienda.ujap.test/api/pedidos -H "Authorization: Bearer <token-admin>"
+curl -s -X PATCH http://tienda.ujap.test/api/pedidos/<id-pedido>/estado -H "Authorization: Bearer <token-admin>" \
      -H "Content-Type: application/json" -d '{"estado": "ENVIADO"}'
 ```
 
@@ -508,17 +512,17 @@ Historial de actividad (parte 4):
 
 ```bash
 # El administrador consulta los últimos eventos y el resumen por servicio
-curl -s "http://localhost/api/eventos?limite=5" -H "Authorization: Bearer <token-admin>"
-curl -s http://localhost/api/eventos/resumen -H "Authorization: Bearer <token-admin>"
+curl -s "http://tienda.ujap.test/api/eventos?limite=5" -H "Authorization: Bearer <token-admin>"
+curl -s http://tienda.ujap.test/api/eventos/resumen -H "Authorization: Bearer <token-admin>"
 
 # Solo los eventos de un servicio
-curl -s "http://localhost/api/eventos?servicio=pedidos" -H "Authorization: Bearer <token-admin>"
+curl -s "http://tienda.ujap.test/api/eventos?servicio=pedidos" -H "Authorization: Bearer <token-admin>"
 
 # Un cliente no puede consultarlo → 403; sin token → 401
-curl -s -i http://localhost/api/eventos -H "Authorization: Bearer <token-cliente>"
+curl -s -i http://tienda.ujap.test/api/eventos -H "Authorization: Bearer <token-cliente>"
 
 # Registrar eventos desde fuera está bloqueado en el gateway → 403
-curl -s -i -X POST http://localhost/api/eventos
+curl -s -i -X POST http://tienda.ujap.test/api/eventos
 ```
 
 Bases de datos:

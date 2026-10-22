@@ -5,8 +5,8 @@ autenticación JWT, permisos por rol, CRUD de los 4 microservicios, comunicació
 pedidos con varios productos, compensación de stock, concurrencia y eventos.
 
 Uso (con el sistema levantado con `docker compose up`):
-    python tests/e2e.py                      # usa http://localhost
-    python tests/e2e.py http://tienda.ujap.test
+    python tests/e2e.py                      # usa http://tienda.ujap.test
+    python tests/e2e.py http://localhost     # otra dirección (p. ej. si no agregaste el nombre a hosts)
 
 Solo usa la biblioteca estándar de Python 3.10+. Al terminar elimina los datos que creó.
 """
@@ -19,7 +19,19 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-BASE = sys.argv[1].rstrip("/") if len(sys.argv) > 1 else "http://localhost"
+
+
+def direccion_por_defecto() -> str:
+    """http://tienda.ujap.test si el nombre está en el archivo hosts; si no, avisa y usa http://localhost."""
+    try:
+        socket.gethostbyname("tienda.ujap.test")
+        return "http://tienda.ujap.test"
+    except OSError:
+        print("Aviso: tienda.ujap.test no está en tu archivo hosts (ver README); se usa http://localhost\n")
+        return "http://localhost"
+
+
+BASE = sys.argv[1].rstrip("/") if len(sys.argv) > 1 else direccion_por_defecto()
 SUFIJO = str(int(time.time()))
 fallos = 0
 total = 0
