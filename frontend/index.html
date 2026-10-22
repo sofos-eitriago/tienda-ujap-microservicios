@@ -154,6 +154,19 @@
     </main>
   </div>
 
+  <!-- Cuadro de confirmación propio (reemplaza al confirm() del navegador) -->
+  <div class="modal" id="modal" hidden>
+    <div class="modal-caja" role="alertdialog" aria-modal="true" aria-labelledby="modal-titulo" aria-describedby="modal-mensaje">
+      <div class="modal-icono" id="modal-icono" aria-hidden="true">!</div>
+      <h3 id="modal-titulo"></h3>
+      <p id="modal-mensaje"></p>
+      <div class="modal-acciones">
+        <button type="button" class="boton-secundario" id="modal-cancelar"></button>
+        <button type="button" class="boton-confirmar" id="modal-aceptar"></button>
+      </div>
+    </div>
+  </div>
+
   <div class="aviso" id="aviso" role="status" aria-live="polite"></div>
 
   <script src="app.js"></script>

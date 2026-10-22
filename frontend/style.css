@@ -234,6 +234,41 @@ td small { display: block; color: var(--texto-suave); font-size: 12px; margin-to
 .insignia.estado-ENTREGADO { background: #e3f5ec; color: var(--exito); }
 .insignia.estado-CANCELADO, .insignia.estado-RECHAZADO { background: #fdecea; color: var(--peligro); }
 
+/* ───── Cuadro de confirmación ───── */
+.modal {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: rgba(16, 24, 40, 0.55); backdrop-filter: blur(3px);
+  animation: modal-fondo 0.15s ease-out;
+}
+.modal-caja {
+  width: 100%; max-width: 420px; padding: 28px 28px 22px; text-align: center;
+  background: var(--superficie); border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  animation: modal-caja 0.18s ease-out;
+}
+.modal-icono {
+  width: 54px; height: 54px; margin: 0 auto 14px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; font-weight: 700; line-height: 1;
+  background: #e8eefb; color: var(--primario);
+}
+.modal-peligro .modal-icono { background: #fdecea; color: var(--peligro); }
+.modal-caja h3 { margin: 0 0 8px; font-size: 19px; }
+.modal-caja p { margin: 0 0 22px; color: var(--texto-suave); font-size: 15px; line-height: 1.5; }
+.modal-acciones { display: flex; gap: 10px; }
+.modal-acciones button { flex: 1; padding: 11px 14px; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
+.boton-confirmar { border: 0; background: var(--primario); color: #fff; }
+.boton-confirmar:hover { background: var(--primario-hover); }
+.modal-peligro .boton-confirmar { background: var(--peligro); }
+.modal-peligro .boton-confirmar:hover { background: #a42f23; }
+.modal-acciones button:focus-visible { outline: 3px solid rgba(31, 78, 140, 0.35); outline-offset: 2px; }
+.modal-peligro .boton-confirmar:focus-visible { outline-color: rgba(192, 57, 43, 0.4); }
+
+@keyframes modal-fondo { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modal-caja { from { opacity: 0; transform: translateY(10px) scale(0.97); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .modal, .modal-caja { animation: none; } }
+
 @media (max-width: 900px) {
   .cabecera, .pestanas, main { padding-left: 16px; padding-right: 16px; }
   .vista.activa { grid-template-columns: 1fr; }

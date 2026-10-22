@@ -174,7 +174,7 @@ Si el puerto 80 de tu equipo está ocupado, cambia `GATEWAY_PORT` en `.env` (por
 
 ### Cuentas de demostración
 
-Se crean al iniciar por primera vez, junto con **6 productos** de ejemplo:
+Se crean al iniciar por primera vez, junto con **28 productos** de ejemplo en 8 categorías (con stock de 12 a 200 unidades):
 
 | Rol | Email | Contraseña |
 |---|---|---|
@@ -268,7 +268,7 @@ La primera vez que arranca el servicio (con la tabla vacía) se crean los tres c
 Microservicio en **Node.js 22 + Express 5 + Mongoose 8** que guarda el catálogo en **MongoDB** (colección `productos`).
 
 - **Verifica los tokens JWT** que emite el servicio de usuarios, con el mismo `JWT_SECRET`, sin consultarle nada. El catálogo se puede **leer sin iniciar sesión**; para modificarlo hay que ser administrador.
-- La primera vez que arranca, con la colección vacía, carga **6 productos de ejemplo**.
+- La primera vez que arranca, con la colección vacía, carga **28 productos de ejemplo** en 8 categorías (computación, accesorios, audio, almacenamiento, redes, impresión, gaming, móviles y tablets), con stock de 12 a 200 unidades. Si ya hay productos, no toca nada.
 - **Validación:** el precio no puede ser negativo y el stock debe ser un entero mayor o igual que 0 (`400`). Un id con formato inválido responde `404`. La búsqueda `?q=` no distingue mayúsculas y escapa los caracteres especiales.
 - Cada alta, cambio y baja de producto se envía como evento al servicio de actividad. Si ese servicio no está disponible, deja un aviso en el log y sigue funcionando.
 - Arranca con reintentos hasta que MongoDB esté disponible, y la imagen corre con un usuario sin privilegios (`node`).
@@ -408,6 +408,7 @@ Interfaz web en **HTML, CSS y JavaScript sin frameworks**, servida por Nginx. So
 - **Vistas según el rol:** el administrador ve *Usuarios*, *Productos*, *Pedidos* y *Actividad*; el cliente, *Productos* y *Pedidos*.
 - **Pedidos con carrito:** se agregan varios productos y se confirman de una vez. El cliente cancela sus pedidos pendientes; el administrador cambia el estado y elige el usuario del pedido.
 - La cabecera muestra el **estado de cada microservicio** (se consulta cada 10 s) y la vista de *Actividad* se actualiza cada 5 s.
+- Las acciones que no se pueden deshacer (eliminar o cancelar) piden confirmación con un **cuadro de diálogo propio**: se cierra con *Escape* o haciendo clic fuera, y el foco empieza en la opción segura.
 - Se puede abrir una vista directamente, por ejemplo `http://tienda.ujap.test/#pedidos`.
 - Todo el texto que llega de la API se escapa antes de mostrarlo, para evitar inyección de HTML.
 

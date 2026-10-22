@@ -89,6 +89,49 @@ function avisar(texto, tipo = 'ok') {
   temporizadorAviso = setTimeout(() => aviso.classList.remove('visible'), 4000);
 }
 
+// Cuadro de confirmación propio. Devuelve una promesa: true si se acepta, false si se cancela
+// (botón, tecla Escape o clic fuera del cuadro). Reemplaza al confirm() del navegador.
+function confirmar({ titulo, mensaje, aceptar = 'Aceptar', cancelar = 'Volver', peligro = false }) {
+  return new Promise((resolver) => {
+    const modal = $('#modal');
+    const botonAceptar = $('#modal-aceptar');
+    const botonCancelar = $('#modal-cancelar');
+    const previo = document.activeElement;
+
+    $('#modal-titulo').textContent = titulo;
+    $('#modal-mensaje').textContent = mensaje;
+    $('#modal-icono').textContent = peligro ? '!' : '?';
+    botonAceptar.textContent = aceptar;
+    botonCancelar.textContent = cancelar;
+    modal.classList.toggle('modal-peligro', peligro);
+
+    const cerrar = (resultado) => {
+      modal.hidden = true;
+      document.removeEventListener('keydown', alTeclear);
+      modal.removeEventListener('mousedown', alHacerClic);
+      botonAceptar.onclick = botonCancelar.onclick = null;
+      previo?.focus?.();
+      resolver(resultado);
+    };
+    // Escape cancela; Tab se queda dentro del cuadro
+    const alTeclear = (e) => {
+      if (e.key === 'Escape') return cerrar(false);
+      if (e.key !== 'Tab') return;
+      const [primero, ultimo] = [botonCancelar, botonAceptar];
+      if (e.shiftKey && document.activeElement === primero) { e.preventDefault(); ultimo.focus(); }
+      else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primero.focus(); }
+    };
+    const alHacerClic = (e) => { if (e.target === modal) cerrar(false); };
+
+    botonAceptar.onclick = () => cerrar(true);
+    botonCancelar.onclick = () => cerrar(false);
+    document.addEventListener('keydown', alTeclear);
+    modal.addEventListener('mousedown', alHacerClic);
+    modal.hidden = false;
+    botonCancelar.focus(); // en acciones destructivas, el foco empieza en la opción segura
+  });
+}
+
 function filaVacia(columnas, texto, esError = false) {
   return `<tr><td colspan="${columnas}" class="vacio ${esError ? 'error-carga' : ''}">${esc(texto)}</td></tr>`;
 }
@@ -248,7 +291,14 @@ alEnviar($('#form-usuario'), async (datos) => {
 
 $('#tabla-usuarios').addEventListener('click', async (evento) => {
   const boton = evento.target.closest('.boton-borrar');
-  if (!boton || !confirm('¿Eliminar este usuario?')) return;
+  if (!boton) return;
+  const usuario = usuarios.find((u) => String(u.id) === boton.dataset.id);
+  if (!(await confirmar({
+    titulo: 'Eliminar usuario',
+    mensaje: `¿Seguro que quieres eliminar a ${usuario?.nombre ?? 'este usuario'}? Esta acción no se puede deshacer.`,
+    aceptar: 'Sí, eliminar',
+    peligro: true,
+  }))) return;
   try {
     await api(`/api/usuarios/${boton.dataset.id}`, { metodo: 'DELETE' });
     avisar('Usuario eliminado');
@@ -291,7 +341,14 @@ alEnviar($('#form-producto'), async (datos) => {
 
 $('#tabla-productos').addEventListener('click', async (evento) => {
   const boton = evento.target.closest('.boton-borrar');
-  if (!boton || !confirm('¿Eliminar este producto?')) return;
+  if (!boton) return;
+  const producto = productos.find((p) => p.id === boton.dataset.id);
+  if (!(await confirmar({
+    titulo: 'Eliminar producto',
+    mensaje: `¿Seguro que quieres eliminar "${producto?.nombre ?? 'este producto'}" del catálogo? Esta acción no se puede deshacer.`,
+    aceptar: 'Sí, eliminar',
+    peligro: true,
+  }))) return;
   try {
     await api(`/api/productos/${boton.dataset.id}`, { metodo: 'DELETE' });
     avisar('Producto eliminado');
@@ -427,11 +484,24 @@ $('#tabla-pedidos').addEventListener('change', (evento) => {
 $('#tabla-pedidos').addEventListener('click', async (evento) => {
   const cancelar = evento.target.closest('[data-cancelar]');
   if (cancelar) {
-    if (confirm('¿Cancelar este pedido? El stock se devolverá al catálogo.')) cambiarEstado(cancelar.dataset.cancelar, 'CANCELADO');
+    const confirmado = await confirmar({
+      titulo: `Cancelar el pedido #${cancelar.dataset.cancelar}`,
+      mensaje: 'Los productos volverán al catálogo y el pedido quedará cancelado. Esta acción no se puede deshacer.',
+      aceptar: 'Sí, cancelar pedido',
+      cancelar: 'No, volver',
+      peligro: true,
+    });
+    if (confirmado) cambiarEstado(cancelar.dataset.cancelar, 'CANCELADO');
     return;
   }
   const boton = evento.target.closest('.boton-borrar');
-  if (!boton || !confirm('¿Eliminar este pedido del historial?')) return;
+  if (!boton) return;
+  if (!(await confirmar({
+    titulo: `Eliminar el pedido #${boton.dataset.id}`,
+    mensaje: 'Se quitará del historial. Si todavía estaba pendiente, sus productos vuelven al catálogo.',
+    aceptar: 'Sí, eliminar',
+    peligro: true,
+  }))) return;
   try {
     await api(`/api/pedidos/${boton.dataset.id}`, { metodo: 'DELETE' });
     avisar('Pedido eliminado');
