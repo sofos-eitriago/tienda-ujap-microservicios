@@ -1,7 +1,7 @@
 # Proyecto Final LPR07304 — Tienda en línea con microservicios
 #
-# PARTE 4 DE 6 — Infraestructura base + servicios de usuarios, productos y actividad.
-# El servicio de pedidos y el frontend se agregan a este archivo en las partes siguientes.
+# PARTE 5 DE 6 — Infraestructura base + los 4 microservicios (usuarios, productos, actividad y pedidos).
+# Solo falta el frontend, que se agrega a este archivo en la última parte.
 #
 # Levantar lo publicado hasta ahora:
 #   docker compose up -d --build
@@ -18,7 +18,7 @@ x-jwt: &jwt
 
 services:
   # ─────────────────────────── Bases de datos ───────────────────────────
-  postgres:                         # SQL — la usan servicio-usuarios y (parte 5) servicio-pedidos
+  postgres:                         # SQL — la usan servicio-usuarios y servicio-pedidos
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${DB_USER:-admin}
@@ -76,6 +76,36 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  servicio-pedidos:                 # Java + Spring Boot + Spring Data JPA — pedidos (usa a los otros tres servicios)
+    build: ./servicio-pedidos
+    environment:
+      <<: *jwt
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-admin}
+      DB_PASS: ${DB_PASS:-admin123}
+      DB_NAME: ${DB_NAME:-tienda}
+      USUARIOS_URL: http://servicio-usuarios:8000
+      PRODUCTOS_URL: http://servicio-productos:3000
+      ACTIVIDAD_URL: http://servicio-actividad:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      servicio-usuarios:
+        condition: service_started
+      servicio-productos:
+        condition: service_started
+      servicio-actividad:
+        condition: service_started
+    networks: [backend, frontend]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 90s             # Spring Boot tarda más en arrancar
+    restart: unless-stopped
+
   # ─────────────── Microservicios con MongoDB (NoSQL) ───────────────
   servicio-productos:               # Node.js + Express + Mongoose — catálogo y stock
     build: ./servicio-productos
@@ -122,6 +152,7 @@ services:
     depends_on:
       - servicio-usuarios
       - servicio-productos
+      - servicio-pedidos
       - servicio-actividad
     networks: [frontend]
     restart: unless-stopped

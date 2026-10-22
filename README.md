@@ -2,7 +2,7 @@
 
 Proyecto Final · **LPR07304 Lenguajes de Programación** · Universidad José Antonio Páez
 
-> **Estado del repositorio: parte 4 de 6.** Están publicadas la infraestructura base y los servicios de usuarios, productos y actividad. Las demás partes se publicarán en el orden de la tabla de más abajo.
+> **Estado del repositorio: parte 5 de 6.** Están publicadas la infraestructura base y los cuatro microservicios. Solo falta la última parte: el frontend, las pruebas automáticas y la documentación final.
 
 ## ¿Qué hace el sistema?
 
@@ -11,7 +11,7 @@ Proyecto Final · **LPR07304 Lenguajes de Programación** · Universidad José A
 - **Los clientes** crean su cuenta, consultan el catálogo, arman pedidos con uno o varios productos y siguen su estado.
 - **El administrador** gestiona usuarios y catálogo, ve todos los pedidos y consulta un historial de actividad.
 
-Cada parte del sistema es un **microservicio escrito en un lenguaje distinto**, con su propio contenedor Docker. Cuando estén publicadas todas las partes, todo se levantará con **un solo comando**.
+Cada parte del sistema es un **microservicio escrito en un lenguaje distinto**, con su propio contenedor Docker. Cuando esté publicada la última parte, todo se levantará con **un solo comando** y con interfaz web.
 
 ## Arquitectura
 
@@ -56,15 +56,15 @@ El repositorio se publica por partes, ordenadas según sus dependencias: el serv
 | 1 | Infraestructura base | `docker-compose.yml` con PostgreSQL y MongoDB, API Gateway (Nginx), variables de entorno y nombre local `tienda.ujap.test` | ✅ Publicada |
 | 2 | Servicio de usuarios y autenticación | `servicio-usuarios/` — Python · FastAPI · PostgreSQL: registro, login, roles y tokens JWT | ✅ Publicada |
 | 3 | Servicio de productos | `servicio-productos/` — Node.js · Express · MongoDB: catálogo y stock | ✅ Publicada |
-| 4 | **Servicio de actividad** | `servicio-actividad/` — Go · MongoDB: historial de eventos del sistema | ✅ Publicada |
-| 5 | Servicio de pedidos | `servicio-pedidos/` — Java · Spring Boot · PostgreSQL | ⏳ Pendiente |
+| 4 | Servicio de actividad | `servicio-actividad/` — Go · MongoDB: historial de eventos del sistema | ✅ Publicada |
+| 5 | **Servicio de pedidos** | `servicio-pedidos/` — Java · Spring Boot · PostgreSQL: pedidos con varios productos | ✅ Publicada |
 | 6 | Frontend, pruebas y documentación | `frontend/`, `tests/`, capturas de pantalla y README completo | ⏳ Pendiente |
 
 ## Contenido publicado
 
 ```
 .
-├── docker-compose.yml        ← bases de datos, servicios de usuarios, productos y actividad, y API Gateway
+├── docker-compose.yml        ← bases de datos, los 4 microservicios y el API Gateway
 ├── .env.example              ← plantilla de variables de entorno
 ├── .gitignore
 ├── .gitattributes
@@ -92,10 +92,23 @@ El repositorio se publica por partes, ordenadas según sus dependencias: el serv
 │       ├── auth.js               ← verificación de tokens JWT y permisos por rol
 │       ├── actividad.js          ← envío de eventos al servicio de actividad
 │       └── seed.js               ← productos de ejemplo
-└── servicio-actividad/       ← parte 4
-    ├── Dockerfile            ← compilación en dos etapas: la imagen final solo lleva el binario
-    ├── go.mod / go.sum
-    └── main.go               ← servidor HTTP, verificación de JWT y acceso a MongoDB
+├── servicio-actividad/       ← parte 4
+│   ├── Dockerfile            ← compilación en dos etapas: la imagen final solo lleva el binario
+│   ├── go.mod / go.sum
+│   └── main.go               ← servidor HTTP, verificación de JWT y acceso a MongoDB
+└── servicio-pedidos/         ← parte 5
+    ├── Dockerfile            ← compilación con Maven en dos etapas: la imagen final solo lleva el JRE
+    ├── pom.xml
+    └── src/main/
+        ├── resources/application.properties
+        └── java/ve/edu/ujap/pedidos/
+            ├── modelo/         ← Pedido, PedidoItem y EstadoPedido (entidades JPA)
+            ├── repositorio/    ← PedidoRepository (Spring Data)
+            ├── servicio/       ← PedidoService (reglas de negocio) y RecuperacionPedidos
+            ├── integracion/    ← llamadas HTTP a usuarios, productos y actividad
+            ├── seguridad/      ← verificación y firma de tokens JWT
+            ├── dto/            ← cuerpos de las peticiones, con validaciones
+            └── web/            ← controladores REST y manejo de errores
 ```
 
 ## Parte 1 — Infraestructura base
@@ -188,7 +201,7 @@ Microservicio en **Node.js 22 + Express 5 + Mongoose 8** que guarda el catálogo
 
 ### Stock a prueba de fallos
 
-Los endpoints `reservar` y `liberar` son para uso **interno**: solo aceptan un token de *servicio* (el que firmará el servicio de pedidos, parte 5) y el gateway los bloquea desde fuera.
+Los endpoints `reservar` y `liberar` son para uso **interno**: solo aceptan un token de *servicio* (el que firma el servicio de pedidos) y el gateway los bloquea desde fuera.
 
 - **Sin sobreventa:** comprobar que hay stock suficiente y descontarlo ocurre en **una sola operación atómica** sobre el documento. Con varias compras simultáneas nunca se vende más de lo que hay.
 - **Idempotentes:** cada operación lleva una `referencia` única (por ejemplo, `pedido-12-<producto>`). Si la misma reserva se repite por un reintento o un *timeout*, el stock no se descuenta dos veces.
@@ -227,12 +240,13 @@ Microservicio en **Go 1.25** (solo la biblioteca estándar `net/http` más el dr
 - Se compila en **dos etapas**: la imagen final solo contiene el binario y corre con un usuario sin privilegios (`nobody`).
 - Reintenta la conexión a MongoDB hasta que esté listo y registra cada petición en el log (salvo `/health`).
 
-Eventos que ya generan las partes publicadas:
+Eventos que generan los servicios:
 
 | Servicio | Tipos de evento |
 |---|---|
 | `usuarios` | `SESION_INICIADA`, `USUARIO_REGISTRADO`, `USUARIO_CREADO`, `USUARIO_ACTUALIZADO`, `USUARIO_ELIMINADO` |
 | `productos` | `PRODUCTO_CREADO`, `PRODUCTO_ACTUALIZADO`, `PRODUCTO_ELIMINADO` |
+| `pedidos` | `PEDIDO_CREADO`, `PEDIDO_ENVIADO`, `PEDIDO_ENTREGADO`, `PEDIDO_CANCELADO`, `PEDIDO_ELIMINADO`, `PEDIDO_RECHAZADO` |
 
 ### Permisos
 
@@ -250,6 +264,66 @@ Eventos que ya generan las partes publicadas:
 | POST | `/api/eventos` | 🔒 servicio (interno) | `{servicio, tipo, mensaje, datos?}` → `201`; `400` si falta alguno de los tres primeros |
 | GET | `/health` | público | Estado del servicio (el gateway lo publica como `/estado/actividad`) |
 
+## Parte 5 — Servicio de pedidos
+
+Microservicio en **Java 21 + Spring Boot 3.5 + Spring Data JPA** que guarda los pedidos en **PostgreSQL** (tablas `pedidos` y `pedido_items`). Es el que **coordina a los otros tres**.
+
+### Cómo se crea un pedido
+
+```
+Cliente ── POST /api/pedidos (token del cliente) ──▶ pedidos (Java)
+   1. GET  /api/usuarios/{id}             ──▶ usuarios (Python)   ¿existe el usuario?
+   2. GET  /api/productos/{id}            ──▶ productos (Node)    nombre y precio de cada producto
+   3. guarda el pedido como PROCESANDO en PostgreSQL
+   4. POST /api/productos/{id}/reservar   ──▶ productos (Node)    reserva el stock de cada producto
+   5. pasa el pedido a PENDIENTE
+   6. POST /api/eventos                   ──▶ actividad (Go)      registra el evento
+```
+
+- Un pedido puede tener **varios productos** (hasta 20 distintos, de 1 a 1000 unidades cada uno). Si el mismo producto aparece repetido, se suman las cantidades.
+- Guarda una **copia del nombre del usuario, de los productos y del precio del momento**: el historial no cambia si luego cambia el precio y se puede consultar aunque otro servicio esté caído.
+- Las llamadas a los otros servicios llevan un **token JWT de servicio** de corta duración (5 minutos) y tienen tiempos de espera (3 s para conectar y 5 s para leer). Si un servicio no responde, el pedido se rechaza con `503` y un mensaje claro.
+- El evento a actividad se envía en segundo plano: si ese servicio falla, el pedido igual se procesa.
+
+### Stock a prueba de fallos
+
+- **Reservas idempotentes:** cada reserva lleva la referencia `pedido-<id>-<producto>`, así que un reintento no descuenta dos veces.
+- **Compensación:** si un pedido de varios productos falla en el segundo (por ejemplo, sin stock), se libera lo que ya se había reservado del primero y el pedido se descarta.
+- **Recuperación automática:** si el servicio se cae a mitad de un pedido, este queda como `PROCESANDO`. Una tarea periódica (cada 30 s) busca los pedidos que llevan más de 60 s en ese estado, devuelve su stock y los marca `RECHAZADO`.
+- **Cancelar devuelve el stock una sola vez.** Eliminar un pedido `PENDIENTE` también lo devuelve.
+
+### Estados de un pedido
+
+`PROCESANDO` (interno, mientras se reserva el stock) → `PENDIENTE` → `ENVIADO` → `ENTREGADO`. También puede terminar en `CANCELADO` o `RECHAZADO` (no se pudo completar).
+
+- `CANCELADO` y `RECHAZADO` son definitivos; un pedido `ENTREGADO` no se puede cancelar.
+- `PROCESANDO` y `RECHAZADO` no se pueden asignar a mano.
+
+### Permisos
+
+| Acción | Sin sesión | Cliente | Administrador |
+|---|:-:|:-:|:-:|
+| Crear un pedido | | ✅ a su nombre | ✅ para cualquier usuario |
+| Ver pedidos | | ✅ solo los suyos | ✅ todos |
+| Cancelar un pedido | | ✅ solo los suyos y `PENDIENTE` | ✅ |
+| Cambiar el estado a `ENVIADO` o `ENTREGADO` | | | ✅ |
+| Eliminar un pedido | | | ✅ |
+
+Un cliente que pide el pedido de otra persona recibe `404`, para no revelar que existe.
+
+### Endpoints
+
+Todas las rutas requieren `Authorization: Bearer <token>`. Los errores tienen el formato `{"detail": "mensaje"}`: `400` datos inválidos, `401` sin token o inválido, `403` sin permiso, `404` no existe, `409` conflicto (por ejemplo, stock insuficiente), `503` otro servicio no disponible.
+
+| Método | Ruta | Quién | Descripción |
+|---|---|---|---|
+| GET | `/api/pedidos?usuarioId=` | 🔒 | Cliente: sus pedidos · Admin: todos (opcionalmente los de un usuario) |
+| GET | `/api/pedidos/{id}` | 🔒 | Un pedido (el cliente solo los suyos) |
+| POST | `/api/pedidos` | 🔒 | `{"items": [{"productoId": "...", "cantidad": 2}]}`; el admin agrega `usuarioId` |
+| PATCH | `/api/pedidos/{id}/estado` | 🔒 | `{"estado": "CANCELADO"}`; el cliente solo puede cancelar |
+| DELETE | `/api/pedidos/{id}` | 🔒 admin | Eliminar |
+| GET | `/health` | público | Estado del servicio (el gateway lo publica como `/estado/pedidos`) |
+
 ## Cómo probar lo publicado
 
 **Requisito:** Docker Desktop (o Docker Engine + Compose v2).
@@ -262,7 +336,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-La primera vez tarda unos minutos (se descargan imágenes y se instalan o compilan las dependencias). Resultado esperado: `postgres`, `mongodb`, `servicio-usuarios`, `servicio-productos` y `servicio-actividad` en estado `healthy`, y `gateway` en `running`.
+La primera vez tarda varios minutos (se descargan imágenes y se compilan los servicios, sobre todo el de Java). Resultado esperado: `postgres`, `mongodb` y los cuatro microservicios en estado `healthy`, y `gateway` en `running`. El servicio de pedidos es el último en estar listo.
 
 Probar la autenticación (parte 2) a través del gateway:
 
@@ -298,7 +372,35 @@ curl -s -X POST http://localhost/api/productos -H "Authorization: Bearer <token-
 curl -s -i -X POST http://localhost/api/productos/<id>/reservar
 ```
 
-Probar el historial de actividad (parte 4). Las acciones anteriores ya generaron eventos:
+Probar los pedidos (parte 5), con el token del cliente y dos `id` del catálogo:
+
+```bash
+# Crear un pedido con dos productos → 201, estado PENDIENTE
+curl -s -X POST http://localhost/api/pedidos -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" \
+     -d '{"items": [{"productoId": "<id1>", "cantidad": 2}, {"productoId": "<id2>", "cantidad": 1}]}'
+
+# El stock bajó en el catálogo
+curl -s http://localhost/api/productos
+
+# Mis pedidos
+curl -s http://localhost/api/pedidos -H "Authorization: Bearer <token>"
+
+# Pedir más de lo que hay (500 unidades) → 409 y no queda nada reservado a medias
+curl -s -i -X POST http://localhost/api/pedidos -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" -d '{"items": [{"productoId": "<id1>", "cantidad": 500}]}'
+
+# Cancelar el pedido → el stock vuelve al catálogo
+curl -s -X PATCH http://localhost/api/pedidos/<id-pedido>/estado -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" -d '{"estado": "CANCELADO"}'
+
+# El administrador ve todos los pedidos y cambia su estado
+curl -s http://localhost/api/pedidos -H "Authorization: Bearer <token-admin>"
+curl -s -X PATCH http://localhost/api/pedidos/<id-pedido>/estado -H "Authorization: Bearer <token-admin>" \
+     -H "Content-Type: application/json" -d '{"estado": "ENVIADO"}'
+```
+
+Probar el historial de actividad (parte 4). Todas las acciones anteriores generaron eventos:
 
 ```bash
 # El administrador consulta los últimos eventos y el resumen por servicio
@@ -306,7 +408,7 @@ curl -s "http://localhost/api/eventos?limite=5" -H "Authorization: Bearer <token
 curl -s http://localhost/api/eventos/resumen -H "Authorization: Bearer <token-admin>"
 
 # Solo los eventos de un servicio
-curl -s "http://localhost/api/eventos?servicio=productos" -H "Authorization: Bearer <token-admin>"
+curl -s "http://localhost/api/eventos?servicio=pedidos" -H "Authorization: Bearer <token-admin>"
 
 # Un cliente no puede consultarlo → 403; sin token → 401
 curl -s -i http://localhost/api/eventos -H "Authorization: Bearer <token-cliente>"
@@ -318,11 +420,11 @@ curl -s -i -X POST http://localhost/api/eventos
 Para comprobar las bases de datos:
 
 ```bash
-docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select id, nombre, email, rol from usuarios;"'
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select id, usuario_nombre, total, estado from pedidos;"'
 docker compose exec mongodb sh -c 'mongosh -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --quiet tienda --eval "db.productos.countDocuments(); db.eventos.countDocuments()"'
 ```
 
-> Como todavía no existen el servicio de pedidos ni el frontend, el gateway responde `502 Bad Gateway` en `/` y en `/api/pedidos`. Es lo esperado en esta etapa.
+> Como todavía no existe el frontend, el gateway responde `502 Bad Gateway` en `/`. Es lo esperado en esta etapa: la API completa ya funciona a través del gateway.
 
 Para detener todo:
 
@@ -346,10 +448,10 @@ Las credenciales **no están en el código**: se definen en `.env` (excluido de 
 
 | Variable | Uso | Parte |
 |---|---|:-:|
-| `DB_USER`, `DB_PASS`, `DB_NAME` | PostgreSQL | 1 |
+| `DB_USER`, `DB_PASS`, `DB_NAME` | PostgreSQL | 1, 2 y 5 |
 | `MONGO_USER`, `MONGO_PASS`, `MONGO_DB` | MongoDB | 1, 3 y 4 |
 | `GATEWAY_PORT` | Puerto del gateway en tu máquina (por defecto `80`) | 1 |
-| `JWT_SECRET` | Secreto con el que se firman y verifican los tokens (mínimo 32 caracteres) | 2, 3 y 4 |
+| `JWT_SECRET` | Secreto con el que se firman y verifican los tokens (mínimo 32 caracteres) | 2 a 5 |
 | `JWT_EXPIRA_MIN` | Duración de la sesión en minutos (por defecto 60) | 2 |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Cuenta de administrador que se crea al primer inicio | 2 |
 
@@ -369,3 +471,4 @@ python -c "import secrets; print(secrets.token_hex(32))"
 - **JWT con secreto compartido:** cada microservicio valida los tokens por su cuenta, sin depender del servicio de usuarios en cada petición.
 - **Operaciones de stock atómicas e idempotentes:** el estado se protege en la propia base de datos, no en el código que la llama.
 - **Registro de eventos desacoplado:** los servicios envían los eventos sin esperar la respuesta y, si el servicio de actividad falla, lo ignoran; una caída del historial no interrumpe las ventas.
+- **Pedidos tolerantes a fallos:** el pedido se guarda antes de reservar el stock y existe una tarea de recuperación, así que una caída a mitad de la operación nunca deja stock descontado sin pedido.
