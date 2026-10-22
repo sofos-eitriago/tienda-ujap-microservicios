@@ -27,6 +27,10 @@ Cada parte del sistema es un **microservicio escrito en un lenguaje distinto**, 
 |---|---|
 | ![Usuarios](docs/capturas/05-usuarios-admin.png) | ![Actividad](docs/capturas/06-actividad-admin.png) |
 
+| Confirmación al eliminar (administrador) | Confirmación al cancelar un pedido (cliente) |
+|---|---|
+| ![Confirmar eliminar](docs/capturas/09-confirmar-eliminar.png) | ![Confirmar cancelar](docs/capturas/10-confirmar-cancelar.png) |
+
 **Servicios respondiendo** — Swagger del servicio de usuarios (FastAPI) y respuesta JSON del servicio de productos (Express):
 
 | Swagger — usuarios | API — productos |
