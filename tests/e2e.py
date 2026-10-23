@@ -194,7 +194,7 @@ p_repetido = b
 comprobar("stock de A 3->1", stock(A["id"]) == 1, stock(A["id"]))
 
 st, b = pedir("POST", "/api/pedidos", {"items": [{"productoId": A["id"], "cantidad": 1}, {"productoId": B["id"], "cantidad": 5}]}, token=CLIENTE)
-comprobar("2º producto sin stock -> 409 con mensaje de Node", st == 409 and "Stock insuficiente" in detalle(b), (st, b))
+comprobar("2.º producto sin stock -> 409 con mensaje de Node", st == 409 and "Stock insuficiente" in detalle(b), (st, b))
 comprobar("COMPENSACIÓN: el stock de A que ya se había reservado vuelve (A sigue en 1)", stock(A["id"]) == 1, stock(A["id"]))
 st, b = pedir("POST", "/api/pedidos", {"items": []}, token=CLIENTE)
 comprobar("pedido sin productos -> 400", st == 400, (st, b))
