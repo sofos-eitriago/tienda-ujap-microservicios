@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import ve.edu.ujap.pedidos.dto.CrearPedidoRequest;
 import ve.edu.ujap.pedidos.dto.ItemPedidoRequest;
+import ve.edu.ujap.pedidos.integracion.NotificacionesCorreo;
 import ve.edu.ujap.pedidos.integracion.ProductoRemoto;
 import ve.edu.ujap.pedidos.integracion.ServiciosExternos;
 import ve.edu.ujap.pedidos.integracion.UsuarioRemoto;
@@ -30,10 +31,12 @@ public class PedidoService {
 
     private final PedidoRepository repositorio;
     private final ServiciosExternos servicios;
+    private final NotificacionesCorreo notificaciones;
 
-    public PedidoService(PedidoRepository repositorio, ServiciosExternos servicios) {
+    public PedidoService(PedidoRepository repositorio, ServiciosExternos servicios, NotificacionesCorreo notificaciones) {
         this.repositorio = repositorio;
         this.servicios = servicios;
+        this.notificaciones = notificaciones;
     }
 
     /** Un administrador ve todos (u opcionalmente los de un usuario); un cliente solo los suyos. */
@@ -61,7 +64,7 @@ public class PedidoService {
      *  3. Se guarda el pedido como PROCESANDO (así queda constancia aunque el servicio se caiga).
      *  4. Productos (Node):  se reserva el stock de cada producto con una referencia única.
      *     Si alguno falla, se libera lo ya reservado y el pedido se descarta.
-     *  5. El pedido pasa a PENDIENTE y se registra el evento en Actividad (Go).
+     *  5. El pedido pasa a PENDIENTE, se registra el evento en Actividad (Go) y se avisa al cliente por correo.
      * Si el proceso se interrumpe entre 3 y 5, RecuperacionPedidos lo resuelve después.
      */
     public Pedido crear(Identidad yo, CrearPedidoRequest solicitud) {
@@ -102,6 +105,7 @@ public class PedidoService {
                 String.format("Pedido #%d de %s: %d producto(s), total $%s",
                         guardado.getId(), guardado.getUsuarioNombre(), guardado.getItems().size(), guardado.getTotal()),
                 Map.of("pedido_id", guardado.getId(), "usuario_id", guardado.getUsuarioId(), "total", guardado.getTotal()));
+        notificaciones.pedidoCreado(guardado);
         return guardado;
     }
 
@@ -139,6 +143,7 @@ public class PedidoService {
         servicios.registrarEvento("PEDIDO_" + nuevoEstado.name(),
                 String.format("Pedido #%d: %s → %s (por %s)", pedido.getId(), anterior, nuevoEstado, nombre(yo)),
                 Map.of("pedido_id", pedido.getId(), "estado", nuevoEstado.name()));
+        notificaciones.estadoCambiado(pedido);
         return pedido;
     }
 
@@ -164,6 +169,7 @@ public class PedidoService {
         servicios.registrarEvento("PEDIDO_RECHAZADO",
                 String.format("Pedido #%d quedó incompleto: se devolvió el stock y se marcó RECHAZADO", pedido.getId()),
                 Map.of("pedido_id", pedido.getId()));
+        notificaciones.estadoCambiado(pedido);
     }
 
     // ─────────────── Auxiliares ───────────────

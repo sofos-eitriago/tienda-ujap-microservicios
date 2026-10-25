@@ -125,16 +125,23 @@ def leer_codigo(email: str, distinto_de: str | None = None) -> str | None:
     return None
 
 
-def ultimo_asunto(email: str) -> str:
-    """Asunto del último correo que recibió `email` en Mailpit (espera un momento a que llegue)."""
-    time.sleep(1)
+def asuntos(email: str) -> list[str]:
+    """Asuntos de los correos que recibió `email` en Mailpit, del más nuevo al más viejo."""
     try:
         consulta = urllib.parse.quote(f'to:"{email}"')
         with urllib.request.urlopen(f"{MAILPIT}/api/v1/search?query={consulta}", timeout=5) as r:
-            mensajes = json.load(r)["messages"]
-        return mensajes[0]["Subject"] if mensajes else ""
+            return [m["Subject"] for m in json.load(r)["messages"]]
     except (OSError, ValueError, KeyError):
-        return ""
+        return []
+
+
+def llego_correo(email: str, asunto: str) -> bool:
+    """True si `email` recibió un correo con ese asunto (espera hasta 10 s: se envían en segundo plano)."""
+    for _ in range(20):
+        if asunto in asuntos(email):
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def otro_codigo(codigo: str) -> str:
@@ -309,6 +316,7 @@ comprobar("el cliente crea un pedido de 2 productos -> 201", st == 201 and len(p
 comprobar("el pedido queda a nombre del cliente (se ignora usuarioId del cuerpo)", p1.get("usuarioId") == cliente_id, p1)
 comprobar("total = 2 x 10.25 + 1 x 3 = 23.50 y estado PENDIENTE", float(p1.get("total", 0)) == 23.5 and p1.get("estado") == "PENDIENTE", p1)
 comprobar("stock reservado en MongoDB (A 5->3, B 2->1)", stock(A["id"]) == 3 and stock(B["id"]) == 1, (stock(A["id"]), stock(B["id"])))
+comprobar("el cliente recibe por correo el aviso del pedido (Java -> SMTP)", llego_correo(email_cliente, f"Recibimos tu pedido #{p1.get('id')}"), asuntos(email_cliente))
 st, b = pedir("POST", "/api/pedidos", {"items": [{"productoId": A["id"], "cantidad": 1}, {"productoId": A["id"], "cantidad": 1}]}, token=CLIENTE)
 comprobar("productos repetidos se suman en una sola línea", st == 201 and len(b["items"]) == 1 and b["items"][0]["cantidad"] == 2, (st, b))
 p_repetido = b
@@ -329,6 +337,7 @@ st, b = pedir("POST", "/api/pedidos", {"usuarioId": 999999, "items": [{"producto
 comprobar("el admin con usuario inexistente -> 400", st == 400 and "no existe" in detalle(b), (st, b))
 st, p_admin = pedir("POST", "/api/pedidos", {"usuarioId": nuevo["id"], "items": [{"productoId": B["id"], "cantidad": 1}]}, token=ADMIN)
 comprobar("el admin crea un pedido para otro usuario -> 201", st == 201 and p_admin.get("usuarioId") == nuevo["id"], (st, p_admin))
+comprobar("el aviso le llega a ese usuario, no al admin", llego_correo(email_nuevo, f"Recibimos tu pedido #{p_admin.get('id')}"), asuntos(email_nuevo))
 
 st, mios = pedir("GET", "/api/pedidos", token=CLIENTE)
 comprobar("el cliente solo ve sus pedidos", st == 200 and {p["usuarioId"] for p in mios} == {cliente_id}, (st, mios))
@@ -347,6 +356,7 @@ st, b = pedir("PATCH", f"/api/pedidos/{p1['id']}/estado", {"estado": "CANCELADO"
 comprobar("cancelar dos veces -> 409 y el stock no se devuelve dos veces", st == 409 and stock(A["id"]) == 3, (st, b, stock(A["id"])))
 st, b = pedir("PATCH", f"/api/pedidos/{p_repetido['id']}/estado", {"estado": "ENVIADO"}, token=ADMIN)
 comprobar("el admin marca ENVIADO", st == 200 and b.get("estado") == "ENVIADO", (st, b))
+comprobar("el cliente recibe el aviso del cambio de estado", llego_correo(email_cliente, f"Tu pedido #{p_repetido['id']} está ENVIADO"), asuntos(email_cliente))
 st, b = pedir("PATCH", f"/api/pedidos/{p_repetido['id']}/estado", {"estado": "CANCELADO"}, token=CLIENTE)
 comprobar("el cliente no puede cancelar un pedido ya ENVIADO -> 403", st == 403, (st, b))
 st, b = pedir("PATCH", f"/api/pedidos/{p_repetido['id']}/estado", {"estado": "VOLANDO"}, token=ADMIN)
@@ -390,7 +400,7 @@ st, _ = pedir("POST", "/api/auth/login", {"email": email_cliente, "password": "P
 st2, b = pedir("POST", "/api/auth/login", {"email": email_cliente, "password": "Segunda2026"})
 comprobar("la contraseña vieja ya no entra y la nueva sí", st == 401 and st2 == 200, (st, st2))
 CLIENTE = b.get("access_token")
-comprobar("llega un correo avisando del cambio de contraseña", "cambió" in ultimo_asunto(email_cliente), ultimo_asunto(email_cliente))
+comprobar("llega un correo avisando del cambio de contraseña", llego_correo(email_cliente, "Tu contraseña de Tienda UJAP cambió"), asuntos(email_cliente))
 st, b = pedir("PUT", f"/api/usuarios/{cliente_id}", {"password": "Prueba2026"}, token=CLIENTE)
 comprobar("tampoco se puede volver a una contraseña anterior desde el perfil -> 400", st == 400 and "reutilizar" in detalle(b), (st, b))
 st, eventos = pedir("GET", "/api/eventos?limite=50", token=ADMIN)

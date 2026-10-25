@@ -17,6 +17,15 @@ name: tienda-ujap
 x-jwt: &jwt
   JWT_SECRET: ${JWT_SECRET:-secreto-de-desarrollo-cambiar-en-produccion-2026}
 
+# Correo (usuarios y pedidos): por defecto va a Mailpit. Con un servidor SMTP real los correos salen a Internet.
+x-correo: &correo
+  SMTP_HOST: ${SMTP_HOST:-mailpit}
+  SMTP_PORT: ${SMTP_PORT:-1025}
+  SMTP_USUARIO: ${SMTP_USUARIO:-}
+  SMTP_CLAVE: ${SMTP_CLAVE:-}
+  SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
+  CORREO_REMITENTE: ${CORREO_REMITENTE:-Tienda UJAP <no-responder@tienda.ujap.test>}
+
 services:
   # ─────────────────────────── Bases de datos ───────────────────────────
   postgres:                         # SQL — la usan servicio-usuarios y servicio-pedidos
@@ -55,7 +64,7 @@ services:
   servicio-usuarios:                # Python + FastAPI + SQLAlchemy — usuarios y login (emite los JWT)
     build: ./servicio-usuarios
     environment:
-      <<: *jwt
+      <<: [*jwt, *correo]
       JWT_EXPIRA_MIN: ${JWT_EXPIRA_MIN:-60}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@tienda.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin2026!}
@@ -65,13 +74,6 @@ services:
       DB_PASS: ${DB_PASS:-admin123}
       DB_NAME: ${DB_NAME:-tienda}
       ACTIVIDAD_URL: http://servicio-actividad:8080
-      # Correo: por defecto va a Mailpit. Con un servidor SMTP real los correos salen a Internet.
-      SMTP_HOST: ${SMTP_HOST:-mailpit}
-      SMTP_PORT: ${SMTP_PORT:-1025}
-      SMTP_USUARIO: ${SMTP_USUARIO:-}
-      SMTP_CLAVE: ${SMTP_CLAVE:-}
-      SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
-      CORREO_REMITENTE: ${CORREO_REMITENTE:-Tienda UJAP <no-responder@tienda.ujap.test>}
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,10 +88,10 @@ services:
       start_period: 15s
     restart: unless-stopped
 
-  servicio-pedidos:                 # Java + Spring Boot + Spring Data JPA — pedidos (usa a los otros tres servicios)
+  servicio-pedidos:                 # Java + Spring Boot + Spring Data JPA — pedidos (usa a los otros tres servicios y avisa por correo)
     build: ./servicio-pedidos
     environment:
-      <<: *jwt
+      <<: [*jwt, *correo]
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: ${DB_USER:-admin}
@@ -106,6 +108,8 @@ services:
       servicio-productos:
         condition: service_started
       servicio-actividad:
+        condition: service_started
+      mailpit:
         condition: service_started
     networks: [backend, frontend]
     healthcheck:
