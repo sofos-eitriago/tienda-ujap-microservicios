@@ -122,6 +122,13 @@ td small { display: block; color: var(--texto-suave); font-size: 12px; margin-to
   border-radius: 6px; padding: 5px 10px; font-size: 13px; cursor: pointer;
 }
 .boton-borrar:hover { background: #fde8e6; }
+.boton-suave {
+  border: 1px solid var(--borde); background: #fff; color: var(--texto-suave);
+  border-radius: 6px; padding: 5px 10px; font-size: 13px; cursor: pointer;
+}
+.boton-suave:hover { background: #f1f4f9; color: var(--texto); }
+td.acciones { white-space: nowrap; }
+td.acciones button + button { margin-left: 6px; }
 
 .selector-estado { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--borde); font: inherit; font-size: 13px; }
 .estado-CANCELADO { color: var(--peligro); }

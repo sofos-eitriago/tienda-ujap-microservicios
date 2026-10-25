@@ -63,8 +63,9 @@ async function api(ruta, { metodo = 'GET', cuerpo } = {}) {
   const respuesta = await fetch(ruta, opciones);
   if (respuesta.status === 204) return null;
   const datos = await respuesta.json().catch(() => null);
+  // El gateway responde 401 si el token expiró o si la sesión se cerró (en este u otro dispositivo)
   if (respuesta.status === 401 && sesion && !ruta.startsWith('/api/auth/')) {
-    cerrarSesion('Tu sesión expiró, vuelve a iniciar sesión');
+    cerrarSesion(mensajeDeError(datos, 401));
     throw new Error('Sesión expirada');
   }
   if (!respuesta.ok) throw new Error(mensajeDeError(datos, respuesta.status));
@@ -224,7 +225,11 @@ alEnviar($('#form-registro'), async (datos) => {
   $('#form-registro').reset();
 });
 
-$('#cerrar-sesion').addEventListener('click', () => cerrarSesion());
+// Avisa al servidor para que el token deje de valer; si no responde, la sesión se cierra igual en el navegador
+$('#cerrar-sesion').addEventListener('click', async () => {
+  await api('/api/auth/logout', { metodo: 'POST' }).catch(() => {});
+  cerrarSesion();
+});
 
 // ───────────── Pestañas ─────────────
 
@@ -274,7 +279,9 @@ async function cargarUsuarios() {
             <td>${esc(u.telefono || '—')}</td>
             <td>${esc(u.ciudad || '—')}</td>
             <td><span class="insignia rol-${esc(u.rol)}">${u.rol === 'admin' ? 'Admin' : 'Cliente'}</span></td>
-            <td>${u.id === sesion.usuario.id ? '' : `<button class="boton-borrar" data-id="${u.id}">Eliminar</button>`}</td>
+            <td class="acciones">${u.id === sesion.usuario.id ? '' : `
+              <button class="boton-suave" data-cerrar-sesiones="${u.id}" title="Sus tokens dejan de valer al instante">Cerrar sesiones</button>
+              <button class="boton-borrar" data-id="${u.id}">Eliminar</button>`}</td>
           </tr>`).join('')
       : filaVacia(7, 'No hay usuarios registrados');
   } catch (error) {
@@ -290,6 +297,22 @@ alEnviar($('#form-usuario'), async (datos) => {
 });
 
 $('#tabla-usuarios').addEventListener('click', async (evento) => {
+  const cerrar = evento.target.closest('[data-cerrar-sesiones]');
+  if (cerrar) {
+    const usuario = usuarios.find((u) => String(u.id) === cerrar.dataset.cerrarSesiones);
+    if (!(await confirmar({
+      titulo: 'Cerrar sus sesiones',
+      mensaje: `${usuario?.nombre ?? 'Este usuario'} tendrá que volver a iniciar sesión en todos sus dispositivos.`,
+      aceptar: 'Sí, cerrar sesiones',
+    }))) return;
+    try {
+      await api(`/api/usuarios/${cerrar.dataset.cerrarSesiones}/cerrar-sesiones`, { metodo: 'POST' });
+      avisar(`Sesiones de ${usuario?.nombre ?? 'el usuario'} cerradas`);
+    } catch (error) {
+      avisar(error.message, 'error');
+    }
+    return;
+  }
   const boton = evento.target.closest('.boton-borrar');
   if (!boton) return;
   const usuario = usuarios.find((u) => String(u.id) === boton.dataset.id);

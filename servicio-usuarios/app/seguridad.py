@@ -1,9 +1,11 @@
 """Autenticación: contraseñas con bcrypt y tokens JWT (HS256).
 
 Este servicio EMITE los tokens al iniciar sesión. Los otros tres microservicios los VERIFICAN
-con el mismo secreto (JWT_SECRET), sin tener que consultar a este servicio en cada petición.
+con el mismo secreto (JWT_SECRET). Además, el gateway consulta a este servicio en cada petición
+con token (ruta interna /interno/verificar) para que una sesión cerrada deje de valer al instante.
 """
 import os
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -41,8 +43,15 @@ def _firmar(datos: dict, minutos: int) -> str:
 
 
 def crear_token(usuario) -> str:
-    """Token de un usuario: sub = id, más nombre, email y rol (admin | cliente)."""
-    return _firmar({"sub": str(usuario.id), "nombre": usuario.nombre, "email": usuario.email, "rol": usuario.rol}, JWT_EXPIRA_MIN)
+    """Token de un usuario: sub = id, más nombre, email y rol (admin | cliente).
+
+    jti identifica a este token (para poder revocarlo solo a él) y ver es la versión de sesión
+    del usuario al emitirlo (para poder revocar de una vez todos sus tokens).
+    """
+    return _firmar({
+        "sub": str(usuario.id), "nombre": usuario.nombre, "email": usuario.email, "rol": usuario.rol,
+        "jti": uuid.uuid4().hex, "ver": usuario.version_sesion,
+    }, JWT_EXPIRA_MIN)
 
 
 def crear_token_servicio() -> str:
@@ -50,11 +59,35 @@ def crear_token_servicio() -> str:
     return _firmar({"sub": "servicio-usuarios", "rol": "servicio"}, 5)
 
 
+class TokenInvalido(Exception):
+    """El token no sirve. motivo: "expirado" o "invalido" (lo usa el gateway para elegir el mensaje)."""
+
+    def __init__(self, motivo: str, mensaje: str):
+        super().__init__(mensaje)
+        self.motivo = motivo
+        self.mensaje = mensaje
+
+
+def decodificar_token(token: str) -> dict:
+    """Verifica la firma y la expiración del token y devuelve su contenido."""
+    try:
+        datos = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITMO], options={"require": ["exp"]})
+    except jwt.ExpiredSignatureError:
+        raise TokenInvalido("expirado", "El token expiró, inicia sesión de nuevo")
+    except jwt.InvalidTokenError:
+        raise TokenInvalido("invalido", "Token inválido")
+    if not datos.get("sub") or not datos.get("rol"):
+        raise TokenInvalido("invalido", "Token inválido")
+    return datos
+
+
 @dataclass
 class Identidad:
     sub: str
     rol: str
     nombre: str | None = None
+    jti: str | None = None
+    expira: datetime | None = None
 
     @property
     def usuario_id(self) -> int | None:
@@ -76,14 +109,11 @@ def identidad_actual(credenciales: Annotated[HTTPAuthorizationCredentials | None
     if credenciales is None:
         raise _no_autorizado("Falta el token de acceso (Authorization: Bearer <token>)")
     try:
-        datos = jwt.decode(credenciales.credentials, JWT_SECRET, algorithms=[JWT_ALGORITMO])
-    except jwt.ExpiredSignatureError:
-        raise _no_autorizado("El token expiró, inicia sesión de nuevo")
-    except jwt.InvalidTokenError:
-        raise _no_autorizado("Token inválido")
-    if not datos.get("sub") or not datos.get("rol"):
-        raise _no_autorizado("Token inválido")
-    return Identidad(sub=datos["sub"], rol=datos["rol"], nombre=datos.get("nombre"))
+        datos = decodificar_token(credenciales.credentials)
+    except TokenInvalido as error:
+        raise _no_autorizado(error.mensaje)
+    return Identidad(sub=datos["sub"], rol=datos["rol"], nombre=datos.get("nombre"), jti=datos.get("jti"),
+                     expira=datetime.fromtimestamp(datos["exp"], timezone.utc))
 
 
 def requiere_rol(*roles: str):

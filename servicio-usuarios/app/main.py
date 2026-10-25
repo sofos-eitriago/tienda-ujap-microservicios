@@ -9,19 +9,21 @@ import time
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Response, status
-from sqlalchemy import func, select
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Response, status
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from .actividad import registrar_evento
 from .database import Base, SessionLocal, engine, get_db
-from .models import Usuario
+from .models import TokenRevocado, Usuario
 from .schemas import Login, Registro, TokenRespuesta, UsuarioActualizar, UsuarioCrear, UsuarioRespuesta
 from .seguridad import (
     JWT_EXPIRA_MIN,
     Identidad,
+    TokenInvalido,
     crear_token,
+    decodificar_token,
     hashear_password,
     identidad_actual,
     requiere_rol,
@@ -44,12 +46,21 @@ CLIENTES_INICIALES = [
     {"nombre": "Ana Gómez", "email": "ana.gomez@ujap.edu.ve", "telefono": "0412-5558899", "ciudad": "San Diego"},
 ]
 
+# create_all crea las tablas nuevas, pero no agrega columnas a una tabla que ya existía:
+# estas sentencias ponen al día una base de datos creada con una versión anterior.
+COLUMNAS_NUEVAS = [
+    "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS version_sesion INTEGER NOT NULL DEFAULT 0",
+]
+
 
 def preparar_base_de_datos(intentos: int = 15) -> None:
-    """Crea la tabla si no existe, carga clientes de ejemplo y garantiza que exista un administrador."""
+    """Crea las tablas si no existen, carga clientes de ejemplo y garantiza que exista un administrador."""
     for intento in range(1, intentos + 1):
         try:
             Base.metadata.create_all(engine)
+            with engine.begin() as conexion:
+                for sentencia in COLUMNAS_NUEVAS:
+                    conexion.execute(text(sentencia))
             break
         except OperationalError:
             if intento == intentos:
@@ -147,6 +158,50 @@ def yo(identidad: Autenticado, db: DB):
     return buscar_usuario(db, identidad.usuario_id)
 
 
+@app.post("/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT, tags=["Autenticación"])
+def logout(identidad: Autenticado, db: DB, tareas: BackgroundTasks):
+    """Cierra la sesión: este token deja de valer en el acto (las demás sesiones del usuario siguen)."""
+    if identidad.jti is None or identidad.usuario_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Este token no corresponde a una sesión de usuario")
+    # De paso se borran los tokens revocados que ya expiraron: no hace falta recordarlos
+    db.execute(delete(TokenRevocado).where(TokenRevocado.expira_en < func.now()))
+    db.merge(TokenRevocado(jti=identidad.jti, expira_en=identidad.expira))
+    db.commit()
+    tareas.add_task(registrar_evento, "SESION_CERRADA", f"{identidad.nombre} cerró sesión", {"usuario_id": identidad.usuario_id})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/interno/verificar", status_code=status.HTTP_204_NO_CONTENT, include_in_schema=False)
+def verificar_sesion(db: DB, authorization: Annotated[str | None, Header()] = None):
+    """Lo consulta el gateway (auth_request) antes de cada petición a la API: 204 deja pasar, 401 la rechaza.
+
+    No está bajo /api, así que no se puede llamar desde fuera de Docker. La cabecera X-Motivo le dice
+    al gateway qué mensaje mostrar.
+    """
+    if authorization is None:
+        # Sin token: pasa, y cada microservicio decide si la ruta es pública (p. ej. el catálogo)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    def rechazar(motivo: str) -> Response:
+        return Response(status_code=status.HTTP_401_UNAUTHORIZED, headers={"X-Motivo": motivo})
+
+    esquema, _, token = authorization.partition(" ")
+    if esquema.lower() != "bearer" or not token:
+        return rechazar("invalido")
+    try:
+        datos = decodificar_token(token)
+    except TokenInvalido as error:
+        return rechazar(error.motivo)
+    if not datos["sub"].isdigit():
+        return rechazar("invalido")  # los tokens de servicio solo viajan dentro de Docker
+    usuario = db.get(Usuario, int(datos["sub"]))
+    if (usuario is None
+            or datos.get("ver", 0) != usuario.version_sesion
+            or (datos.get("jti") and db.get(TokenRevocado, datos["jti"]) is not None)):
+        return rechazar("revocado")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 # ─────────────────────────── Usuarios ───────────────────────────
 
 @app.get("/api/usuarios", response_model=list[UsuarioRespuesta], tags=["Usuarios"])
@@ -181,6 +236,9 @@ def actualizar_usuario(usuario_id: int, datos: UsuarioActualizar, identidad: Aut
 
     usuario = buscar_usuario(db, usuario_id)
     cambios = datos.model_dump(exclude_unset=True, exclude_none=True)
+    # Con otra contraseña u otro rol, los tokens que ya tenía el usuario dejan de valer
+    if "password" in cambios or cambios.get("rol", usuario.rol) != usuario.rol:
+        usuario.version_sesion += 1
     if "password" in cambios:
         usuario.password_hash = hashear_password(cambios.pop("password"))
     for campo, valor in cambios.items():
@@ -189,6 +247,16 @@ def actualizar_usuario(usuario_id: int, datos: UsuarioActualizar, identidad: Aut
     db.refresh(usuario)
     tareas.add_task(registrar_evento, "USUARIO_ACTUALIZADO", f"Usuario actualizado: {usuario.nombre}", {"usuario_id": usuario.id})
     return usuario
+
+
+@app.post("/api/usuarios/{usuario_id}/cerrar-sesiones", status_code=status.HTTP_204_NO_CONTENT, tags=["Usuarios"])
+def cerrar_sesiones(usuario_id: int, _admin: Admin, db: DB, tareas: BackgroundTasks):
+    """El administrador cierra todas las sesiones abiertas de un usuario (p. ej. si le robaron la cuenta)."""
+    usuario = buscar_usuario(db, usuario_id)
+    usuario.version_sesion += 1
+    db.commit()
+    tareas.add_task(registrar_evento, "SESIONES_CERRADAS", f"Se cerraron todas las sesiones de {usuario.nombre}", {"usuario_id": usuario_id})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.delete("/api/usuarios/{usuario_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Usuarios"])

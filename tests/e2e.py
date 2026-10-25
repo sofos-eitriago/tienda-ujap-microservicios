@@ -10,6 +10,9 @@ Uso (con el sistema levantado con `docker compose up`):
 
 Solo usa la biblioteca estándar de Python 3.10+. Al terminar elimina los datos que creó.
 """
+import base64
+import hashlib
+import hmac
 import json
 import socket
 import sys
@@ -40,7 +43,8 @@ probando_limite = False  # solo la sección del límite de intentos espera respu
 
 def leer_env() -> dict:
     """Lee las credenciales del administrador del .env del proyecto (o usa las de por defecto)."""
-    valores = {"ADMIN_EMAIL": "admin@tienda.com", "ADMIN_PASSWORD": "Admin2026!"}
+    valores = {"ADMIN_EMAIL": "admin@tienda.com", "ADMIN_PASSWORD": "Admin2026!",
+               "JWT_SECRET": "secreto-de-desarrollo-cambiar-en-produccion-2026"}
     archivo = Path(__file__).resolve().parent.parent / ".env"
     if archivo.exists():
         for linea in archivo.read_text(encoding="utf-8-sig").splitlines():
@@ -71,6 +75,13 @@ def pedir(metodo, ruta, cuerpo=None, token=None):
             return e.code, json.loads(texto)
         except ValueError:
             return e.code, texto
+
+
+def firmar_jwt(datos: dict, secreto: str) -> str:
+    """JWT HS256 hecho a mano (solo biblioteca estándar), para probar tokens que no emite el sistema."""
+    b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=")
+    cuerpo = b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()) + b"." + b64(json.dumps(datos).encode())
+    return (cuerpo + b"." + b64(hmac.new(secreto.encode(), cuerpo, hashlib.sha256).digest())).decode()
 
 
 def comprobar(nombre, condicion, detalle=""):
@@ -130,6 +141,21 @@ comprobar("GET /api/auth/yo devuelve al cliente", st == 200 and b.get("email") =
 st, b = pedir("GET", "/api/auth/yo", token=CLIENTE[:-3] + "abc")
 comprobar("token alterado -> 401", st == 401, (st, b))
 
+print("== Cierre de sesión inmediato (el gateway consulta al servicio de usuarios)")
+st, b = pedir("POST", "/api/auth/login", {"email": email_cliente, "password": "Prueba2026"})
+SEGUNDA_SESION = b.get("access_token")
+st, b = pedir("POST", "/api/auth/logout", token=SEGUNDA_SESION)
+comprobar("cerrar sesión -> 204", st == 204, (st, b))
+st, b = pedir("GET", "/api/auth/yo", token=SEGUNDA_SESION)
+comprobar("ese token deja de valer al instante, aunque no expiró -> 401", st == 401 and "cerrada" in detalle(b), (st, b))
+st, b = pedir("GET", "/api/pedidos", token=SEGUNDA_SESION)
+comprobar("tampoco vale en otro microservicio (pedidos, Java) -> 401", st == 401, (st, b))
+st, b = pedir("GET", "/api/auth/yo", token=CLIENTE)
+comprobar("la otra sesión del mismo cliente sigue abierta", st == 200, (st, b))
+token_servicio = firmar_jwt({"sub": "servicio-pedidos", "rol": "servicio", "exp": int(time.time()) + 300}, env["JWT_SECRET"])
+st, b = pedir("GET", f"/api/usuarios/{cliente_id}", token=token_servicio)
+comprobar("un token de servicio no se acepta desde fuera de Docker -> 401", st == 401, (st, b))
+
 print("== Permisos por rol")
 st, _ = pedir("GET", "/api/usuarios")
 comprobar("listar usuarios sin token -> 401", st == 401, st)
@@ -162,6 +188,13 @@ comprobar(f"listar usuarios como admin -> {len(lista)} usuarios", st == 200 and 
 email_nuevo = f"nuevo{SUFIJO}@gmail.com"
 st, nuevo = pedir("POST", "/api/usuarios", {"nombre": "Usuario Nuevo", "email": email_nuevo, "password": "Nuevo2026"}, token=ADMIN)
 comprobar("crear usuario como admin -> 201", st == 201 and nuevo.get("rol") == "cliente", (st, nuevo))
+st, b = pedir("POST", "/api/auth/login", {"email": email_nuevo, "password": "Nuevo2026"})
+TOKEN_NUEVO = b.get("access_token")
+st, b = pedir("POST", f"/api/usuarios/{nuevo['id']}/cerrar-sesiones", token=CLIENTE)
+comprobar("un cliente no puede cerrar sesiones ajenas -> 403", st == 403, (st, b))
+st, b = pedir("POST", f"/api/usuarios/{nuevo['id']}/cerrar-sesiones", token=ADMIN)
+st2, b2 = pedir("GET", "/api/auth/yo", token=TOKEN_NUEVO)
+comprobar("el admin cierra todas las sesiones de un usuario -> su token ya no vale", st == 204 and st2 == 401, (st, b, st2, b2))
 st, b = pedir("POST", "/api/usuarios", {"nombre": "Repetido", "email": email_nuevo, "password": "Nuevo2026"}, token=ADMIN)
 comprobar("email duplicado -> 409", st == 409, (st, b))
 st, b = pedir("POST", "/api/usuarios", {"nombre": "X", "email": "no-es-email", "password": "Nuevo2026"}, token=ADMIN)
@@ -277,6 +310,8 @@ st1, _ = pedir("DELETE", f"/api/usuarios/{cliente_id}", token=ADMIN)
 st2, _ = pedir("DELETE", f"/api/usuarios/{nuevo['id']}", token=ADMIN)
 st3, _ = pedir("GET", f"/api/productos/{A['id']}")
 comprobar("usuarios y productos de prueba eliminados", st1 == 204 and st2 == 204 and st3 == 404, (st1, st2, st3))
+st, b = pedir("GET", "/api/pedidos", token=CLIENTE)
+comprobar("el token de una cuenta eliminada deja de valer al instante -> 401", st == 401, (st, b))
 
 print(f"\nRESULTADO: {total - fallos}/{total} comprobaciones correctas" + ("" if fallos == 0 else f" — {fallos} FALLAS"))
 sys.exit(1 if fallos else 0)
