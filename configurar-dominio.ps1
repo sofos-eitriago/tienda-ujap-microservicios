@@ -20,7 +20,7 @@ if (-not $esAdmin) {
 
 # 1) Archivo hosts
 if (Select-String -Path $hosts -Pattern ([regex]::Escape($dominio)) -Quiet) {
-    Write-Host "El archivo hosts ya tenia $dominio" -ForegroundColor Green
+    Write-Host "El archivo hosts ya incluye $dominio" -ForegroundColor Green
 } else {
     Add-Content -Path $hosts -Value "`r`n127.0.0.1 $dominio" -Encoding ASCII
     ipconfig /flushdns | Out-Null
@@ -35,7 +35,7 @@ if ($LASTEXITCODE -eq 0 -and (Test-Path $ca)) {
     Get-ChildItem Cert:\LocalMachine\Root | Where-Object Subject -like "*Tienda UJAP - CA local de desarrollo*" | Remove-Item
     Import-Certificate -FilePath $ca -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
     Remove-Item $ca
-    Write-Host "Listo: abre https://$dominio (si el navegador estaba abierto, reinicialo)" -ForegroundColor Green
+    Write-Host "Listo: cierra el navegador si estaba abierto y luego abre https://$dominio" -ForegroundColor Green
 } else {
     Write-Host "No se pudo leer el certificado: levanta el sistema (docker compose up) y vuelve a ejecutar este script." -ForegroundColor Yellow
     Write-Host "Mientras tanto puedes abrir https://$dominio aceptando la advertencia del navegador." -ForegroundColor Yellow
