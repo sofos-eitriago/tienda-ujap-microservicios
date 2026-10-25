@@ -5,8 +5,11 @@ autenticación JWT, permisos por rol, CRUD de los 4 microservicios, comunicació
 pedidos con varios productos, compensación de stock, concurrencia y eventos.
 
 Uso (con el sistema levantado con `docker compose up`):
-    python tests/e2e.py                      # usa http://tienda.ujap.test
-    python tests/e2e.py http://localhost     # otra dirección (p. ej. si no agregaste el nombre a hosts)
+    python tests/e2e.py                      # usa https://tienda.ujap.test
+    python tests/e2e.py https://localhost    # otra dirección (p. ej. si no agregaste el nombre a hosts)
+
+El certificado HTTPS se verifica de verdad: primero se descarga la CA local del gateway y todas
+las peticiones se hacen confiando solo en ella.
 
 Los códigos que llegan por correo se leen del buzón de pruebas Mailpit (http://localhost:8025,
 o la dirección de la variable MAILPIT_URL).
@@ -20,6 +23,7 @@ import json
 import os
 import re
 import socket
+import ssl
 import sys
 import time
 import urllib.error
@@ -31,16 +35,28 @@ from pathlib import Path
 
 
 def direccion_por_defecto() -> str:
-    """http://tienda.ujap.test si el nombre está en el archivo hosts; si no, avisa y usa http://localhost."""
+    """https://tienda.ujap.test si el nombre está en el archivo hosts; si no, avisa y usa https://localhost."""
     try:
         socket.gethostbyname("tienda.ujap.test")
-        return "http://tienda.ujap.test"
+        return "https://tienda.ujap.test"
     except OSError:
-        print("Aviso: tienda.ujap.test no está en tu archivo hosts (ver README); se usa http://localhost\n")
-        return "http://localhost"
+        print("Aviso: tienda.ujap.test no está en tu archivo hosts (ver README); se usa https://localhost\n")
+        return "https://localhost"
 
 
 BASE = sys.argv[1].rstrip("/") if len(sys.argv) > 1 else direccion_por_defecto()
+if BASE.startswith("http://"):  # el gateway redirige HTTP a HTTPS: se prueba directo por HTTPS
+    BASE = "https://" + BASE.removeprefix("http://")
+
+
+def contexto_tls() -> ssl.SSLContext:
+    """Contexto TLS que solo confía en la CA local del gateway (se descarga una vez sin verificar)."""
+    with urllib.request.urlopen(BASE + "/ca-tienda-ujap.crt", context=ssl._create_unverified_context(), timeout=10) as r:
+        ca = r.read().decode()
+    return ssl.create_default_context(cadata=ca)
+
+
+CTX = contexto_tls()
 MAILPIT = os.getenv("MAILPIT_URL", "http://localhost:8025")  # buzón de pruebas: ahí llegan los códigos
 SUFIJO = str(int(time.time()))
 fallos = 0
@@ -69,7 +85,7 @@ def pedir(metodo, ruta, cuerpo=None, token=None):
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(req, timeout=20, context=CTX) as r:
             texto = r.read().decode()
             es_json = "json" in r.headers.get("Content-Type", "")
             return r.status, (json.loads(texto) if texto and es_json else texto)
@@ -174,6 +190,26 @@ st, html = pedir("GET", "/")
 comprobar("GET / sirve el frontend", st == 200 and "Tienda UJAP" in html)
 st, docs = pedir("GET", "/api/usuarios/docs")
 comprobar("Swagger de usuarios disponible por el gateway", st == 200 and "swagger" in docs.lower())
+
+print("== HTTPS")
+host = urllib.parse.urlsplit(BASE).hostname
+sin_redirigir = urllib.request.build_opener(type("SinRedirigir", (urllib.request.HTTPRedirectHandler,), {"redirect_request": lambda *a: None}))
+try:
+    sin_redirigir.open(f"http://{host}/api/productos?q=x", timeout=10)
+    st, destino = 200, ""
+except urllib.error.HTTPError as e:
+    st, destino = e.code, e.headers.get("Location", "")
+comprobar("HTTP redirige a HTTPS conservando la ruta (308)", st == 308 and destino == f"https://{host}/api/productos?q=x", (st, destino))
+with socket.create_connection((host, urllib.parse.urlsplit(BASE).port or 443), timeout=10) as crudo:
+    with CTX.wrap_socket(crudo, server_hostname=host) as tls:
+        version, emisor = tls.version(), dict(x[0] for x in tls.getpeercert()["issuer"]).get("commonName", "")
+comprobar(f"certificado válido para {host}, firmado por la CA local ({version})", version in ("TLSv1.2", "TLSv1.3") and "CA local" in emisor, (version, emisor))
+try:  # mismo servidor y misma CA de confianza: si falla, es solo por el nombre
+    with CTX.wrap_socket(socket.create_connection((host, urllib.parse.urlsplit(BASE).port or 443), timeout=10), server_hostname="otro-sitio.com"):
+        otro_nombre = "aceptado"
+except ssl.SSLCertVerificationError as e:
+    otro_nombre = "rechazado" if "match" in str(e) or "mismatch" in str(e) else str(e)
+comprobar("el certificado no sirve para otro nombre de sitio", otro_nombre == "rechazado", otro_nombre)
 cerrados = [p for p in (8001, 8002, 8003, 8004) if not puerto_abierto(p)]
 comprobar("los microservicios NO publican puertos (8001-8004 cerrados)", len(cerrados) == 4, f"abiertos: {set((8001, 8002, 8003, 8004)) - set(cerrados)}")
 

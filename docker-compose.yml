@@ -3,8 +3,9 @@
 # Levantar todo el sistema con un solo comando:
 #   docker compose up --build
 #
-# Abrir: http://tienda.ujap.test
-# (la primera vez hay que agregar ese nombre al archivo hosts: ver el README o configurar-dominio.ps1)
+# Abrir: https://tienda.ujap.test
+# (la primera vez hay que agregar ese nombre al archivo hosts y, para que el navegador no muestre
+#  la advertencia del certificado, confiar en la CA local: configurar-dominio.ps1 hace las dos cosas)
 #
 # Las variables ${...} se leen del archivo .env (si no existe, se usan los valores por defecto).
 # Solo el gateway publica un puerto: los microservicios y las bases de datos no son accesibles
@@ -178,9 +179,15 @@ services:
     networks: [frontend]
     restart: unless-stopped
 
-  gateway:                          # Nginx: único punto de entrada al sistema
+  gateway:                          # Nginx: único punto de entrada al sistema (HTTPS; HTTP redirige a HTTPS)
     build: ./gateway
-    ports: ["${GATEWAY_PORT:-80}:80"]
+    ports:
+      - "${GATEWAY_PORT:-80}:80"
+      - "${GATEWAY_PORT_HTTPS:-443}:443"
+    environment:
+      PUERTO_HTTPS: ${GATEWAY_PORT_HTTPS:-443}
+    volumes:
+      - certificados:/etc/nginx/certificados   # el certificado se crea una vez y se conserva
     depends_on:
       - frontend
       - servicio-usuarios
@@ -198,3 +205,4 @@ networks:
 volumes:
   pgdata:
   mongodata:
+  certificados:
