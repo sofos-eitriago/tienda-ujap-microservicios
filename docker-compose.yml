@@ -9,6 +9,7 @@
 # Las variables ${...} se leen del archivo .env (si no existe, se usan los valores por defecto).
 # Solo el gateway publica un puerto: los microservicios y las bases de datos no son accesibles
 # desde fuera de Docker. Para depurar con puertos directos ver docker-compose.debug.yml.
+# La excepción es el buzón de pruebas Mailpit (http://localhost:8025), solo para esta máquina.
 
 name: tienda-ujap
 
@@ -64,9 +65,18 @@ services:
       DB_PASS: ${DB_PASS:-admin123}
       DB_NAME: ${DB_NAME:-tienda}
       ACTIVIDAD_URL: http://servicio-actividad:8080
+      # Correo: por defecto va a Mailpit. Con un servidor SMTP real los correos salen a Internet.
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USUARIO: ${SMTP_USUARIO:-}
+      SMTP_CLAVE: ${SMTP_CLAVE:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
+      CORREO_REMITENTE: ${CORREO_REMITENTE:-Tienda UJAP <no-responder@tienda.ujap.test>}
     depends_on:
       postgres:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     networks: [backend, frontend]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
@@ -143,6 +153,19 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    restart: unless-stopped
+
+  # ───────────────────────── Correo de pruebas ─────────────────────────
+  mailpit:                          # Recibe todos los correos del sistema y los muestra en http://localhost:8025
+    image: axllent/mailpit:v1.27.10
+    # Solo se publica en esta máquina (127.0.0.1): desde otro equipo no se pueden leer los correos
+    ports: ["127.0.0.1:${MAILPIT_PORT:-8025}:8025"]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   # ───────────────────── Frontend + API Gateway ─────────────────────

@@ -8,16 +8,22 @@ Uso (con el sistema levantado con `docker compose up`):
     python tests/e2e.py                      # usa http://tienda.ujap.test
     python tests/e2e.py http://localhost     # otra dirección (p. ej. si no agregaste el nombre a hosts)
 
+Los códigos que llegan por correo se leen del buzón de pruebas Mailpit (http://localhost:8025,
+o la dirección de la variable MAILPIT_URL).
+
 Solo usa la biblioteca estándar de Python 3.10+. Al terminar elimina los datos que creó.
 """
 import base64
 import hashlib
 import hmac
 import json
+import os
+import re
 import socket
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -35,6 +41,7 @@ def direccion_por_defecto() -> str:
 
 
 BASE = sys.argv[1].rstrip("/") if len(sys.argv) > 1 else direccion_por_defecto()
+MAILPIT = os.getenv("MAILPIT_URL", "http://localhost:8025")  # buzón de pruebas: ahí llegan los códigos
 SUFIJO = str(int(time.time()))
 fallos = 0
 total = 0
@@ -100,6 +107,37 @@ def stock(producto_id) -> int:
     return pedir("GET", f"/api/productos/{producto_id}")[1]["stock"]
 
 
+def leer_codigo(email: str, distinto_de: str | None = None) -> str | None:
+    """Busca en Mailpit el último correo enviado a `email` y saca el código de 6 dígitos (espera hasta 10 s)."""
+    for _ in range(20):
+        try:
+            consulta = urllib.parse.quote(f'to:"{email}"')
+            with urllib.request.urlopen(f"{MAILPIT}/api/v1/search?query={consulta}", timeout=5) as r:
+                mensajes = json.load(r)["messages"]
+            if mensajes:  # Mailpit los devuelve del más nuevo al más viejo
+                with urllib.request.urlopen(f"{MAILPIT}/api/v1/message/{mensajes[0]['ID']}", timeout=5) as r:
+                    encontrado = re.search(r"\b(\d{6})\b", json.load(r)["Text"])
+                if encontrado and encontrado.group(1) != distinto_de:
+                    return encontrado.group(1)
+        except (OSError, ValueError, KeyError):
+            pass
+        time.sleep(0.5)
+    return None
+
+
+def otro_codigo(codigo: str) -> str:
+    """Un código de 6 dígitos que seguro no es el correcto."""
+    return f"{(int(codigo) + 1) % 1_000_000:06d}"
+
+
+def dns_disponible() -> bool:
+    try:
+        socket.getaddrinfo("gmail.com", 25)
+        return True
+    except OSError:
+        return False
+
+
 def puerto_abierto(puerto: int) -> bool:
     with socket.socket() as s:
         s.settimeout(1)
@@ -129,13 +167,47 @@ st, b = pedir("POST", "/api/auth/login", {"email": env["ADMIN_EMAIL"], "password
 comprobar("contraseña incorrecta -> 401", st == 401, (st, b))
 st, b = pedir("POST", "/api/auth/login", {"email": f"nadie{SUFIJO}@gmail.com", "password": "loquesea123"})
 comprobar("email inexistente -> 401 (mismo mensaje)", st == 401 and detalle(b) == "Email o contraseña incorrectos", (st, b))
-email_cliente = f"cliente{SUFIJO}@gmail.com"
-st, b = pedir("POST", "/api/auth/registro", {"nombre": "Cliente Prueba", "email": email_cliente, "password": "Prueba2026", "ciudad": "Valencia"})
-comprobar("registro de cliente -> 201 con token y rol cliente", st == 201 and b["usuario"]["rol"] == "cliente", (st, b))
-CLIENTE = b.get("access_token")
-cliente_id = b.get("usuario", {}).get("id")
 st, b = pedir("POST", "/api/auth/registro", {"nombre": "Otro", "email": f"otro{SUFIJO}@gmail.com", "password": "corta"})
 comprobar("registro con contraseña corta -> 422", st == 422, (st, b))
+
+print("== Registro con confirmación del correo (Mailpit)")
+email_cliente = f"cliente{SUFIJO}@gmail.com"
+st, b = pedir("POST", "/api/auth/registro", {"nombre": "Cliente Prueba", "email": email_cliente, "password": "Prueba2026", "ciudad": "Valencia"})
+comprobar("registro de cliente -> 201 sin token (falta confirmar el correo)", st == 201 and "access_token" not in b and email_cliente in b.get("mensaje", ""), (st, b))
+st, b = pedir("POST", "/api/auth/login", {"email": email_cliente, "password": "Prueba2026"})
+comprobar("login antes de confirmar el correo -> 403", st == 403 and "confirma tu correo" in detalle(b), (st, b))
+codigo = leer_codigo(email_cliente)
+comprobar("llega a Mailpit un correo con un código de 6 dígitos", codigo is not None, f"¿Mailpit en {MAILPIT}?")
+codigo = codigo or "000000"
+st, b = pedir("POST", "/api/auth/verificar-correo", {"email": email_cliente, "codigo": otro_codigo(codigo)})
+comprobar("código incorrecto -> 400", st == 400, (st, b))
+st, b = pedir("POST", "/api/auth/verificar-correo", {"email": email_cliente, "codigo": codigo})
+comprobar("código correcto -> 200 con token y rol cliente", st == 200 and b.get("access_token") and b["usuario"]["rol"] == "cliente", (st, b))
+CLIENTE = b.get("access_token")
+cliente_id = b.get("usuario", {}).get("id")
+st, b = pedir("POST", "/api/auth/verificar-correo", {"email": email_cliente, "codigo": codigo})
+comprobar("el mismo código no sirve dos veces -> 400", st == 400, (st, b))
+st, b = pedir("POST", "/api/auth/registro", {"nombre": "Repetido", "email": email_cliente, "password": "Prueba2026"})
+comprobar("registrar un correo ya confirmado -> 409", st == 409, (st, b))
+
+email_otro = f"otro{SUFIJO}@gmail.com"
+pedir("POST", "/api/auth/registro", {"nombre": "Otro Cliente", "email": email_otro, "password": "Prueba2026"})
+codigo_otro = leer_codigo(email_otro) or "000000"
+for _ in range(5):
+    pedir("POST", "/api/auth/verificar-correo", {"email": email_otro, "codigo": otro_codigo(codigo_otro)})
+st, b = pedir("POST", "/api/auth/verificar-correo", {"email": email_otro, "codigo": codigo_otro})
+comprobar("tras 5 códigos incorrectos el código se anula (adivinar no sirve)", st == 400, (st, b))
+st, b = pedir("POST", "/api/auth/reenviar-codigo", {"email": email_otro})
+st2, b2 = pedir("POST", "/api/auth/reenviar-codigo", {"email": f"nadie{SUFIJO}@gmail.com"})
+comprobar("reenviar código -> 202, con la misma respuesta exista o no la cuenta", st == st2 == 202 and b == b2, (st, b, st2, b2))
+st, b = pedir("POST", "/api/auth/verificar-correo", {"email": email_otro, "codigo": leer_codigo(email_otro, distinto_de=codigo_otro) or "000000"})
+comprobar("el código reenviado sí sirve", st == 200, (st, b))
+otro_id = b.get("usuario", {}).get("id")
+if dns_disponible():
+    st, b = pedir("POST", "/api/auth/registro", {"nombre": "Sin Dominio", "email": f"x@no-existe-{SUFIJO}.com", "password": "Prueba2026"})
+    comprobar("registro con un dominio que no existe -> 400", st == 400 and "dominio" in detalle(b), (st, b))
+else:
+    print("  --    sin DNS en esta máquina: se omite la prueba del dominio inexistente")
 st, b = pedir("GET", "/api/auth/yo", token=CLIENTE)
 comprobar("GET /api/auth/yo devuelve al cliente", st == 200 and b.get("email") == email_cliente, (st, b))
 st, b = pedir("GET", "/api/auth/yo", token=CLIENTE[:-3] + "abc")
@@ -187,7 +259,7 @@ st, lista = pedir("GET", "/api/usuarios", token=ADMIN)
 comprobar(f"listar usuarios como admin -> {len(lista)} usuarios", st == 200 and len(lista) >= 4, (st, lista))
 email_nuevo = f"nuevo{SUFIJO}@gmail.com"
 st, nuevo = pedir("POST", "/api/usuarios", {"nombre": "Usuario Nuevo", "email": email_nuevo, "password": "Nuevo2026"}, token=ADMIN)
-comprobar("crear usuario como admin -> 201", st == 201 and nuevo.get("rol") == "cliente", (st, nuevo))
+comprobar("crear usuario como admin -> 201, con el correo ya confirmado", st == 201 and nuevo.get("rol") == "cliente" and nuevo.get("email_verificado") is True, (st, nuevo))
 st, b = pedir("POST", "/api/auth/login", {"email": email_nuevo, "password": "Nuevo2026"})
 TOKEN_NUEVO = b.get("access_token")
 st, b = pedir("POST", f"/api/usuarios/{nuevo['id']}/cerrar-sesiones", token=CLIENTE)
@@ -284,7 +356,7 @@ st, eventos = pedir("GET", "/api/eventos?limite=300", token=ADMIN)
 tipos = {e["tipo"] for e in eventos}
 servicios = {e["servicio"] for e in eventos}
 comprobar("hay eventos de usuarios, productos y pedidos", {"usuarios", "productos", "pedidos"} <= servicios, servicios)
-for t in ["SESION_INICIADA", "USUARIO_REGISTRADO", "USUARIO_CREADO", "PRODUCTO_CREADO", "PEDIDO_CREADO", "PEDIDO_ENVIADO", "PEDIDO_CANCELADO"]:
+for t in ["SESION_INICIADA", "USUARIO_REGISTRADO", "CORREO_VERIFICADO", "SESION_CERRADA", "SESIONES_CERRADAS", "USUARIO_CREADO", "PRODUCTO_CREADO", "PEDIDO_CREADO", "PEDIDO_ENVIADO", "PEDIDO_CANCELADO"]:
     comprobar(f"evento {t}", t in tipos, tipos)
 st, resumen = pedir("GET", "/api/eventos/resumen", token=ADMIN)
 comprobar(f"resumen: {resumen.get('total')} eventos", st == 200 and resumen.get("total", 0) > 0, resumen)
@@ -308,8 +380,9 @@ for producto in (A, B, C):
     pedir("DELETE", f"/api/productos/{producto['id']}", token=ADMIN)
 st1, _ = pedir("DELETE", f"/api/usuarios/{cliente_id}", token=ADMIN)
 st2, _ = pedir("DELETE", f"/api/usuarios/{nuevo['id']}", token=ADMIN)
+st4, _ = pedir("DELETE", f"/api/usuarios/{otro_id}", token=ADMIN)
 st3, _ = pedir("GET", f"/api/productos/{A['id']}")
-comprobar("usuarios y productos de prueba eliminados", st1 == 204 and st2 == 204 and st3 == 404, (st1, st2, st3))
+comprobar("usuarios y productos de prueba eliminados", st1 == st2 == st4 == 204 and st3 == 404, (st1, st2, st4, st3))
 st, b = pedir("GET", "/api/pedidos", token=CLIENTE)
 comprobar("el token de una cuenta eliminada deja de valer al instante -> 401", st == 401, (st, b))
 

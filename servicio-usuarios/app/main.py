@@ -7,6 +7,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Response, status
@@ -15,9 +16,28 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from .actividad import registrar_evento
+from .correo import (
+    CODIGO_MAX_INTENTOS,
+    CODIGO_VALIDEZ_MIN,
+    codigo_correcto,
+    dominio_sin_correo,
+    enviar_correo,
+    hash_codigo,
+    nuevo_codigo,
+)
 from .database import Base, SessionLocal, engine, get_db
-from .models import TokenRevocado, Usuario
-from .schemas import Login, Registro, TokenRespuesta, UsuarioActualizar, UsuarioCrear, UsuarioRespuesta
+from .models import CodigoCorreo, TokenRevocado, Usuario
+from .schemas import (
+    Login,
+    Mensaje,
+    PedirCodigo,
+    Registro,
+    TokenRespuesta,
+    UsuarioActualizar,
+    UsuarioCrear,
+    UsuarioRespuesta,
+    VerificarCorreo,
+)
 from .seguridad import (
     JWT_EXPIRA_MIN,
     Identidad,
@@ -50,6 +70,7 @@ CLIENTES_INICIALES = [
 # estas sentencias ponen al día una base de datos creada con una versión anterior.
 COLUMNAS_NUEVAS = [
     "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS version_sesion INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS email_verificado BOOLEAN NOT NULL DEFAULT TRUE",
 ]
 
 
@@ -125,6 +146,60 @@ def respuesta_token(usuario: Usuario) -> TokenRespuesta:
     )
 
 
+def usuario_por_email(db: Session, email: str) -> Usuario | None:
+    return db.scalar(select(Usuario).where(Usuario.email == email))
+
+
+# ─────────────── Códigos por correo ───────────────
+
+CODIGO_INVALIDO = "El código es incorrecto o ya venció. Revisa el correo o pide uno nuevo"
+
+
+def emitir_codigo(db: Session, usuario: Usuario, proposito: str) -> str:
+    """Crea un código nuevo (anulando el anterior del mismo propósito) y lo devuelve para enviarlo."""
+    db.execute(delete(CodigoCorreo).where(CodigoCorreo.usuario_id == usuario.id, CodigoCorreo.proposito == proposito))
+    codigo = nuevo_codigo()
+    db.add(CodigoCorreo(
+        usuario_id=usuario.id,
+        proposito=proposito,
+        codigo_hash=hash_codigo(usuario.id, proposito, codigo),
+        expira_en=datetime.now(timezone.utc) + timedelta(minutes=CODIGO_VALIDEZ_MIN),
+    ))
+    db.commit()
+    return codigo
+
+
+def consumir_codigo(db: Session, usuario: Usuario | None, proposito: str, codigo: str) -> None:
+    """Comprueba el código. Si es correcto lo borra (sirve una sola vez); quien llama hace el commit.
+    Tras CODIGO_MAX_INTENTOS fallos el código se anula, así no se puede adivinar probando."""
+    if usuario is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=CODIGO_INVALIDO)
+    guardado = db.scalar(
+        select(CodigoCorreo)
+        .where(CodigoCorreo.usuario_id == usuario.id, CodigoCorreo.proposito == proposito)
+        .with_for_update()  # dos intentos a la vez no pueden usar el mismo código
+    )
+    if guardado is None or guardado.expira_en < datetime.now(timezone.utc):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=CODIGO_INVALIDO)
+    if not codigo_correcto(usuario.id, proposito, codigo, guardado.codigo_hash):
+        guardado.intentos += 1
+        if guardado.intentos >= CODIGO_MAX_INTENTOS:
+            db.delete(guardado)
+        db.commit()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=CODIGO_INVALIDO)
+    db.delete(guardado)
+
+
+def enviar_codigo_verificacion(db: Session, usuario: Usuario, tareas: BackgroundTasks) -> None:
+    codigo = emitir_codigo(db, usuario, "verificacion")
+    tareas.add_task(
+        enviar_correo, usuario.email, "Confirma tu correo en Tienda UJAP",
+        f"Hola, {usuario.nombre}:\n\n"
+        f"Tu código para activar la cuenta es: {codigo}\n\n"
+        f"Vence en {CODIGO_VALIDEZ_MIN} minutos. Si no creaste una cuenta en Tienda UJAP, ignora este correo.\n",
+    )
+
+
 @app.get("/health", tags=["Estado"])
 def health():
     return {"status": "ok", "servicio": "usuarios", "lenguaje": "Python/FastAPI"}
@@ -134,21 +209,55 @@ def health():
 
 @app.post("/api/auth/login", response_model=TokenRespuesta, tags=["Autenticación"])
 def login(datos: Login, db: DB, tareas: BackgroundTasks):
-    usuario = db.scalar(select(Usuario).where(Usuario.email == datos.email))
+    usuario = usuario_por_email(db, datos.email)
     if not verificar_password(datos.password, usuario.password_hash if usuario else None):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Email o contraseña incorrectos")
+    if not usuario.email_verificado:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Primero confirma tu correo con el código que te enviamos")
     tareas.add_task(registrar_evento, "SESION_INICIADA", f"{usuario.nombre} inició sesión ({usuario.rol})", {"usuario_id": usuario.id})
     return respuesta_token(usuario)
 
 
-@app.post("/api/auth/registro", response_model=TokenRespuesta, status_code=status.HTTP_201_CREATED, tags=["Autenticación"])
+@app.post("/api/auth/registro", response_model=Mensaje, status_code=status.HTTP_201_CREATED, tags=["Autenticación"])
 def registro(datos: Registro, db: DB, tareas: BackgroundTasks):
-    usuario = Usuario(**datos.model_dump(exclude={"password"}), rol="cliente", password_hash=hashear_password(datos.password))
-    db.add(usuario)
+    """Crea la cuenta sin confirmar y envía un código al correo. La sesión se abre al confirmarlo."""
+    if dominio_sin_correo(datos.email):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"El dominio {datos.email.rsplit('@', 1)[1]} no existe o no recibe correos")
+    usuario = usuario_por_email(db, datos.email)
+    if usuario is not None and usuario.email_verificado:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=f"Ya existe un usuario con el email {datos.email}")
+    if usuario is None:
+        usuario = Usuario(email=datos.email, rol="cliente")
+        db.add(usuario)
+    # Un registro sin confirmar se puede repetir: así nadie bloquea un correo ajeno registrándolo antes
+    usuario.nombre, usuario.telefono, usuario.ciudad = datos.nombre, datos.telefono, datos.ciudad
+    usuario.password_hash = hashear_password(datos.password)
+    usuario.email_verificado = False
     guardar(db, datos.email)
     db.refresh(usuario)
-    tareas.add_task(registrar_evento, "USUARIO_REGISTRADO", f"Nueva cuenta de cliente: {usuario.nombre}", {"usuario_id": usuario.id})
+    enviar_codigo_verificacion(db, usuario, tareas)
+    tareas.add_task(registrar_evento, "USUARIO_REGISTRADO", f"Nueva cuenta de cliente (sin confirmar): {usuario.nombre}", {"usuario_id": usuario.id})
+    return Mensaje(mensaje=f"Te enviamos un código a {usuario.email}. Escríbelo para activar tu cuenta.")
+
+
+@app.post("/api/auth/verificar-correo", response_model=TokenRespuesta, tags=["Autenticación"])
+def verificar_correo(datos: VerificarCorreo, db: DB, tareas: BackgroundTasks):
+    """Confirma el correo con el código recibido y abre la sesión."""
+    usuario = usuario_por_email(db, datos.email)
+    consumir_codigo(db, usuario if usuario and not usuario.email_verificado else None, "verificacion", datos.codigo)
+    usuario.email_verificado = True
+    db.commit()
+    tareas.add_task(registrar_evento, "CORREO_VERIFICADO", f"{usuario.nombre} confirmó su correo", {"usuario_id": usuario.id})
     return respuesta_token(usuario)
+
+
+@app.post("/api/auth/reenviar-codigo", response_model=Mensaje, status_code=status.HTTP_202_ACCEPTED, tags=["Autenticación"])
+def reenviar_codigo(datos: PedirCodigo, db: DB, tareas: BackgroundTasks):
+    """Manda un código nuevo. Responde lo mismo exista o no la cuenta, para no revelar qué correos están registrados."""
+    usuario = usuario_por_email(db, datos.email)
+    if usuario is not None and not usuario.email_verificado:
+        enviar_codigo_verificacion(db, usuario, tareas)
+    return Mensaje(mensaje="Si hay una cuenta pendiente de confirmar con ese correo, te enviamos un código nuevo")
 
 
 @app.get("/api/auth/yo", response_model=UsuarioRespuesta, tags=["Autenticación"])
@@ -239,12 +348,20 @@ def actualizar_usuario(usuario_id: int, datos: UsuarioActualizar, identidad: Aut
     # Con otra contraseña u otro rol, los tokens que ya tenía el usuario dejan de valer
     if "password" in cambios or cambios.get("rol", usuario.rol) != usuario.rol:
         usuario.version_sesion += 1
+    # Un cliente que cambia su correo tiene que confirmar el nuevo antes de volver a entrar
+    # (lo que cambia un administrador se da por bueno)
+    confirmar_correo = cambios.get("email", usuario.email) != usuario.email and not identidad.es_admin
+    if confirmar_correo:
+        usuario.email_verificado = False
+        usuario.version_sesion += 1
     if "password" in cambios:
         usuario.password_hash = hashear_password(cambios.pop("password"))
     for campo, valor in cambios.items():
         setattr(usuario, campo, valor)
     guardar(db, datos.email)
     db.refresh(usuario)
+    if confirmar_correo:
+        enviar_codigo_verificacion(db, usuario, tareas)
     tareas.add_task(registrar_evento, "USUARIO_ACTUALIZADO", f"Usuario actualizado: {usuario.nombre}", {"usuario_id": usuario.id})
     return usuario
 

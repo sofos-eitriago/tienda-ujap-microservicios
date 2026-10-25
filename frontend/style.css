@@ -127,8 +127,8 @@ td small { display: block; color: var(--texto-suave); font-size: 12px; margin-to
   border-radius: 6px; padding: 5px 10px; font-size: 13px; cursor: pointer;
 }
 .boton-suave:hover { background: #f1f4f9; color: var(--texto); }
-td.acciones { white-space: nowrap; }
-td.acciones button + button { margin-left: 6px; }
+td.acciones button { display: block; width: 100%; white-space: nowrap; }
+td.acciones button + button { margin-top: 6px; }
 
 .selector-estado { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--borde); font: inherit; font-size: 13px; }
 .estado-CANCELADO { color: var(--peligro); }
@@ -213,6 +213,15 @@ td.acciones button + button { margin-left: 6px; }
 .demo-cuenta:hover { border-color: var(--primario); }
 .demo .nota { margin: 4px 0 0; font-size: 12px; }
 .demo code { background: #eef1f6; padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+.acceso-tarjeta h2 { margin: 0 0 14px; font-size: 18px; }
+.acceso-tarjeta .nota { margin: 0 0 16px; }
+.campo-codigo { font-size: 22px !important; letter-spacing: 8px; text-align: center; font-variant-numeric: tabular-nums; }
+.enlaces-acceso { display: flex; justify-content: space-between; margin: 14px 0 4px; }
+.enlace { border: 0; background: none; padding: 4px 0; font: inherit; font-size: 13px; font-weight: 600; color: var(--primario); cursor: pointer; }
+.enlace:hover { text-decoration: underline; }
+.nota-correo { margin: 14px 0 0 !important; padding-top: 12px; border-top: 1px solid var(--borde); font-size: 12px; }
+.nota-correo a { color: var(--primario); font-weight: 600; }
+.sin-confirmar { margin-left: 6px; font-size: 11px; }
 
 /* ───── Carrito del pedido ───── */
 .agregar-item { display: grid; grid-template-columns: 1fr 70px auto; gap: 8px; align-items: end; }

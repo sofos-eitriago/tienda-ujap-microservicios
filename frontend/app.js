@@ -68,7 +68,11 @@ async function api(ruta, { metodo = 'GET', cuerpo } = {}) {
     cerrarSesion(mensajeDeError(datos, 401));
     throw new Error('Sesión expirada');
   }
-  if (!respuesta.ok) throw new Error(mensajeDeError(datos, respuesta.status));
+  if (!respuesta.ok) {
+    const error = new Error(mensajeDeError(datos, respuesta.status));
+    error.status = respuesta.status;
+    throw error;
+  }
   return datos;
 }
 
@@ -165,11 +169,25 @@ function alEnviar(form, accion) {
 
 // ───────────── Sesión ─────────────
 
+const FORMULARIOS_ACCESO = ['login', 'registro', 'verificar'];
+
 function mostrarAcceso(formulario) {
   document.querySelectorAll('.acceso-pestana').forEach((b) => b.classList.toggle('activa', b.dataset.acceso === formulario));
-  $('#form-login').hidden = formulario !== 'login';
-  $('#form-registro').hidden = formulario !== 'registro';
+  for (const f of FORMULARIOS_ACCESO) $(`#form-${f}`).hidden = f !== formulario;
 }
+
+// Muestra el formulario para escribir el código que llegó por correo
+function pedirCodigo(email) {
+  const form = $('#form-verificar');
+  form.reset();
+  form.elements.email.value = email;
+  $('#verificar-email').textContent = email;
+  mostrarAcceso('verificar');
+  form.elements.codigo.focus();
+}
+
+// Buzón de pruebas Mailpit: solo se publica en esta máquina (puerto 8025)
+document.querySelectorAll('.enlace-buzon').forEach((a) => { a.href = `http://${location.hostname}:8025`; });
 
 function iniciarSesion(respuesta) {
   guardarSesion({ token: respuesta.access_token, usuario: respuesta.usuario });
@@ -183,6 +201,7 @@ function cerrarSesion(mensaje) {
   $('#app').hidden = true;
   $('#sesion').hidden = true;
   $('#pantalla-acceso').hidden = false;
+  mostrarAcceso('login');
   document.body.className = '';
   history.replaceState(null, '', location.pathname);
   if (mensaje) avisar(mensaje, 'error');
@@ -206,6 +225,7 @@ function mostrarApp() {
 }
 
 document.querySelectorAll('.acceso-pestana').forEach((b) => b.addEventListener('click', () => mostrarAcceso(b.dataset.acceso)));
+document.querySelectorAll('[data-ir]').forEach((b) => b.addEventListener('click', () => mostrarAcceso(b.dataset.ir)));
 
 document.querySelectorAll('.demo-cuenta').forEach((b) => b.addEventListener('click', () => {
   $('#form-login [name="email"]').value = b.dataset.email;
@@ -216,13 +236,35 @@ document.querySelectorAll('.demo-cuenta').forEach((b) => b.addEventListener('cli
 }));
 
 alEnviar($('#form-login'), async (datos) => {
-  iniciarSesion(await api('/api/auth/login', { metodo: 'POST', cuerpo: datos }));
+  try {
+    iniciarSesion(await api('/api/auth/login', { metodo: 'POST', cuerpo: datos }));
+  } catch (error) {
+    if (error.status === 403) pedirCodigo(datos.email); // la cuenta existe pero falta confirmar el correo
+    throw error;
+  }
   $('#form-login').reset();
 });
 
+// Registrarse no abre la sesión: primero hay que confirmar el correo con el código
 alEnviar($('#form-registro'), async (datos) => {
-  iniciarSesion(await api('/api/auth/registro', { metodo: 'POST', cuerpo: datos }));
+  const respuesta = await api('/api/auth/registro', { metodo: 'POST', cuerpo: datos });
   $('#form-registro').reset();
+  pedirCodigo(datos.email);
+  avisar(respuesta.mensaje);
+});
+
+alEnviar($('#form-verificar'), async (datos) => {
+  iniciarSesion(await api('/api/auth/verificar-correo', { metodo: 'POST', cuerpo: datos }));
+  $('#form-verificar').reset();
+});
+
+$('#reenviar-codigo').addEventListener('click', async () => {
+  try {
+    const respuesta = await api('/api/auth/reenviar-codigo', { metodo: 'POST', cuerpo: { email: $('#form-verificar').elements.email.value } });
+    avisar(respuesta.mensaje);
+  } catch (error) {
+    avisar(error.message, 'error');
+  }
 });
 
 // Avisa al servidor para que el token deje de valer; si no responde, la sesión se cierra igual en el navegador
@@ -275,7 +317,7 @@ async function cargarUsuarios() {
           <tr>
             <td>${u.id}</td>
             <td>${esc(u.nombre)}</td>
-            <td>${esc(u.email)}</td>
+            <td>${esc(u.email)}${u.email_verificado ? '' : '<span class="insignia sin-confirmar" title="Todavía no escribió el código que le llegó por correo">sin confirmar</span>'}</td>
             <td>${esc(u.telefono || '—')}</td>
             <td>${esc(u.ciudad || '—')}</td>
             <td><span class="insignia rol-${esc(u.rol)}">${u.rol === 'admin' ? 'Admin' : 'Cliente'}</span></td>

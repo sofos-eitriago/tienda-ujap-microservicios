@@ -36,6 +36,22 @@ class Login(BaseModel):
     password: str
 
 
+Codigo = Field(pattern=r"^\d{6}$", description="Código de 6 dígitos que llegó por correo")
+
+
+class VerificarCorreo(BaseModel):
+    email: EmailStr
+    codigo: str = Codigo
+
+
+class PedirCodigo(BaseModel):
+    email: EmailStr
+
+
+class Mensaje(BaseModel):
+    mensaje: str
+
+
 class UsuarioRespuesta(BaseModel):
     # from_attributes permite convertir directamente el objeto de SQLAlchemy a JSON
     model_config = ConfigDict(from_attributes=True)
@@ -46,6 +62,7 @@ class UsuarioRespuesta(BaseModel):
     telefono: str | None
     ciudad: str | None
     rol: str
+    email_verificado: bool
     creado_en: datetime
 
 

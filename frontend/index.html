@@ -50,6 +50,20 @@
         </div>
         <button type="submit">Crear cuenta</button>
       </form>
+
+      <form class="formulario" id="form-verificar" hidden>
+        <h2>Confirma tu correo</h2>
+        <p class="nota">Escribe el código de 6 dígitos que enviamos a <strong id="verificar-email"></strong>. Vence en 15 minutos.</p>
+        <input type="hidden" name="email">
+        <label>Código <input name="codigo" required inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" class="campo-codigo"></label>
+        <button type="submit">Confirmar y entrar</button>
+        <div class="enlaces-acceso">
+          <button type="button" class="enlace" id="reenviar-codigo">Reenviar el código</button>
+          <button type="button" class="enlace" data-ir="login">Volver</button>
+        </div>
+        <p class="nota nota-correo">En este entorno los correos no salen a Internet: llegan al buzón de pruebas
+          <a class="enlace-buzon" target="_blank" rel="noopener">Mailpit</a>.</p>
+      </form>
     </div>
   </section>
 
