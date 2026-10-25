@@ -35,6 +35,7 @@ BASE = sys.argv[1].rstrip("/") if len(sys.argv) > 1 else direccion_por_defecto()
 SUFIJO = str(int(time.time()))
 fallos = 0
 total = 0
+probando_limite = False  # solo la sección del límite de intentos espera respuestas 429
 
 
 def leer_env() -> dict:
@@ -62,6 +63,9 @@ def pedir(metodo, ruta, cuerpo=None, token=None):
             es_json = "json" in r.headers.get("Content-Type", "")
             return r.status, (json.loads(texto) if texto and es_json else texto)
     except urllib.error.HTTPError as e:
+        if e.code == 429 and not probando_limite:
+            sys.exit("\nEl gateway está limitando los intentos de acceso (seguramente por una ejecución anterior).\n"
+                     "Espera un minuto y vuelve a ejecutar las pruebas.")
         texto = e.read().decode()
         try:
             return e.code, json.loads(texto)
@@ -251,6 +255,15 @@ for t in ["SESION_INICIADA", "USUARIO_REGISTRADO", "USUARIO_CREADO", "PRODUCTO_C
     comprobar(f"evento {t}", t in tipos, tipos)
 st, resumen = pedir("GET", "/api/eventos/resumen", token=ADMIN)
 comprobar(f"resumen: {resumen.get('total')} eventos", st == 200 and resumen.get("total", 0) > 0, resumen)
+
+print("== Límite de intentos en el gateway (va al final: agota el cupo de esta IP durante un minuto)")
+probando_limite = True
+codigos = []
+while len(codigos) < 30 and 429 not in codigos:
+    st, b = pedir("POST", "/api/auth/login", {"email": f"fuerza{SUFIJO}@gmail.com", "password": "adivinando"})
+    codigos.append(st)
+comprobar(f"tras {codigos.count(401)} intentos fallidos el gateway responde 429", codigos[-1] == 429 and set(codigos[:-1]) == {401}, codigos)
+comprobar("el 429 trae un mensaje en JSON", "Demasiados intentos" in detalle(b), b)
 
 print("== Limpieza")
 st, pedidos = pedir("GET", "/api/pedidos", token=ADMIN)
