@@ -33,10 +33,20 @@ class CodigoCorreo(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), index=True)
-    proposito: Mapped[str] = mapped_column(String(20))  # "verificacion"
+    proposito: Mapped[str] = mapped_column(String(20))  # "verificacion" | "recuperacion"
     codigo_hash: Mapped[str] = mapped_column(String(64))  # HMAC del código: el código no se guarda
     expira_en: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     intentos: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ClaveAnterior(Base):
+    """Hashes bcrypt de las últimas contraseñas de cada usuario, para que no pueda volver a usarlas."""
+    __tablename__ = "claves_anteriores"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), index=True)
+    password_hash: Mapped[str] = mapped_column(String(100))
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class TokenRevocado(Base):

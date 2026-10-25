@@ -26,12 +26,13 @@ from .correo import (
     nuevo_codigo,
 )
 from .database import Base, SessionLocal, engine, get_db
-from .models import CodigoCorreo, TokenRevocado, Usuario
+from .models import ClaveAnterior, CodigoCorreo, TokenRevocado, Usuario
 from .schemas import (
     Login,
     Mensaje,
     PedirCodigo,
     Registro,
+    Restablecer,
     TokenRespuesta,
     UsuarioActualizar,
     UsuarioCrear,
@@ -190,6 +191,35 @@ def consumir_codigo(db: Session, usuario: Usuario | None, proposito: str, codigo
     db.delete(guardado)
 
 
+# ─────────────── Contraseñas ───────────────
+
+CLAVES_ANTERIORES = 3  # además de la actual, no se pueden repetir las 3 anteriores
+
+
+def cambiar_password(db: Session, usuario: Usuario, nueva: str, tareas: BackgroundTasks) -> None:
+    """Cambia la contraseña (sin hacer commit): rechaza la actual y las anteriores, guarda la
+    actual en el historial, cierra todas las sesiones del usuario y le avisa por correo."""
+    anteriores = db.scalars(
+        select(ClaveAnterior).where(ClaveAnterior.usuario_id == usuario.id).order_by(ClaveAnterior.id.desc())
+    ).all()
+    if any(verificar_password(nueva, h) for h in [usuario.password_hash, *(c.password_hash for c in anteriores)]):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"No puedes reutilizar la contraseña actual ni ninguna de las {CLAVES_ANTERIORES} anteriores",
+        )
+    db.add(ClaveAnterior(usuario_id=usuario.id, password_hash=usuario.password_hash))
+    for vieja in anteriores[CLAVES_ANTERIORES - 1:]:
+        db.delete(vieja)
+    usuario.password_hash = hashear_password(nueva)
+    usuario.version_sesion += 1
+    tareas.add_task(
+        enviar_correo, usuario.email, "Tu contraseña de Tienda UJAP cambió",
+        f"Hola, {usuario.nombre}:\n\n"
+        "La contraseña de tu cuenta acaba de cambiar y se cerraron todas tus sesiones abiertas.\n\n"
+        "Si no fuiste tú, recupera tu cuenta con \"¿Olvidaste tu contraseña?\" en la página de inicio de sesión.\n",
+    )
+
+
 def enviar_codigo_verificacion(db: Session, usuario: Usuario, tareas: BackgroundTasks) -> None:
     codigo = emitir_codigo(db, usuario, "verificacion")
     tareas.add_task(
@@ -258,6 +288,34 @@ def reenviar_codigo(datos: PedirCodigo, db: DB, tareas: BackgroundTasks):
     if usuario is not None and not usuario.email_verificado:
         enviar_codigo_verificacion(db, usuario, tareas)
     return Mensaje(mensaje="Si hay una cuenta pendiente de confirmar con ese correo, te enviamos un código nuevo")
+
+
+@app.post("/api/auth/recuperar", response_model=Mensaje, status_code=status.HTTP_202_ACCEPTED, tags=["Autenticación"])
+def recuperar_password(datos: PedirCodigo, db: DB, tareas: BackgroundTasks):
+    """Envía un código para elegir una contraseña nueva. Responde lo mismo exista o no la cuenta."""
+    usuario = usuario_por_email(db, datos.email)
+    if usuario is not None:
+        codigo = emitir_codigo(db, usuario, "recuperacion")
+        tareas.add_task(
+            enviar_correo, usuario.email, "Recupera tu contraseña de Tienda UJAP",
+            f"Hola, {usuario.nombre}:\n\n"
+            f"Tu código para elegir una contraseña nueva es: {codigo}\n\n"
+            f"Vence en {CODIGO_VALIDEZ_MIN} minutos. Si no lo pediste, ignora este correo: tu contraseña no cambia.\n",
+        )
+    return Mensaje(mensaje="Si hay una cuenta con ese correo, te enviamos un código para elegir una contraseña nueva")
+
+
+@app.post("/api/auth/restablecer", response_model=Mensaje, tags=["Autenticación"])
+def restablecer_password(datos: Restablecer, db: DB, tareas: BackgroundTasks):
+    """Cambia la contraseña con el código recibido. Cierra todas las sesiones abiertas de la cuenta."""
+    usuario = usuario_por_email(db, datos.email)
+    consumir_codigo(db, usuario, "recuperacion", datos.codigo)
+    # Si la contraseña nueva se rechaza, no hay commit: el código sigue sirviendo para otro intento
+    cambiar_password(db, usuario, datos.password, tareas)
+    usuario.email_verificado = True  # quien recibió el código demostró que el correo es suyo
+    db.commit()
+    tareas.add_task(registrar_evento, "CLAVE_RESTABLECIDA", f"{usuario.nombre} eligió una contraseña nueva", {"usuario_id": usuario.id})
+    return Mensaje(mensaje="Listo: tu contraseña cambió. Ya puedes iniciar sesión con ella")
 
 
 @app.get("/api/auth/yo", response_model=UsuarioRespuesta, tags=["Autenticación"])
@@ -346,7 +404,9 @@ def actualizar_usuario(usuario_id: int, datos: UsuarioActualizar, identidad: Aut
     usuario = buscar_usuario(db, usuario_id)
     cambios = datos.model_dump(exclude_unset=True, exclude_none=True)
     # Con otra contraseña u otro rol, los tokens que ya tenía el usuario dejan de valer
-    if "password" in cambios or cambios.get("rol", usuario.rol) != usuario.rol:
+    if "password" in cambios:
+        cambiar_password(db, usuario, cambios.pop("password"), tareas)
+    if cambios.get("rol", usuario.rol) != usuario.rol:
         usuario.version_sesion += 1
     # Un cliente que cambia su correo tiene que confirmar el nuevo antes de volver a entrar
     # (lo que cambia un administrador se da por bueno)
@@ -354,8 +414,6 @@ def actualizar_usuario(usuario_id: int, datos: UsuarioActualizar, identidad: Aut
     if confirmar_correo:
         usuario.email_verificado = False
         usuario.version_sesion += 1
-    if "password" in cambios:
-        usuario.password_hash = hashear_password(cambios.pop("password"))
     for campo, valor in cambios.items():
         setattr(usuario, campo, valor)
     guardar(db, datos.email)

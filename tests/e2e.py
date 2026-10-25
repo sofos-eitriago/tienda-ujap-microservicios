@@ -125,6 +125,18 @@ def leer_codigo(email: str, distinto_de: str | None = None) -> str | None:
     return None
 
 
+def ultimo_asunto(email: str) -> str:
+    """Asunto del último correo que recibió `email` en Mailpit (espera un momento a que llegue)."""
+    time.sleep(1)
+    try:
+        consulta = urllib.parse.quote(f'to:"{email}"')
+        with urllib.request.urlopen(f"{MAILPIT}/api/v1/search?query={consulta}", timeout=5) as r:
+            mensajes = json.load(r)["messages"]
+        return mensajes[0]["Subject"] if mensajes else ""
+    except (OSError, ValueError, KeyError):
+        return ""
+
+
 def otro_codigo(codigo: str) -> str:
     """Un código de 6 dígitos que seguro no es el correcto."""
     return f"{(int(codigo) + 1) % 1_000_000:06d}"
@@ -360,6 +372,29 @@ for t in ["SESION_INICIADA", "USUARIO_REGISTRADO", "CORREO_VERIFICADO", "SESION_
     comprobar(f"evento {t}", t in tipos, tipos)
 st, resumen = pedir("GET", "/api/eventos/resumen", token=ADMIN)
 comprobar(f"resumen: {resumen.get('total')} eventos", st == 200 and resumen.get("total", 0) > 0, resumen)
+
+print("== Recuperar la contraseña por correo e historial de contraseñas")
+st, b = pedir("POST", "/api/auth/recuperar", {"email": email_cliente})
+st2, b2 = pedir("POST", "/api/auth/recuperar", {"email": f"nadie{SUFIJO}@gmail.com"})
+comprobar("pedir recuperación -> 202, con la misma respuesta exista o no la cuenta", st == st2 == 202 and b == b2, (st, b, st2, b2))
+codigo_rec = leer_codigo(email_cliente, distinto_de=codigo) or "000000"
+st, b = pedir("POST", "/api/auth/restablecer", {"email": email_cliente, "codigo": codigo_rec, "password": "Prueba2026"})
+comprobar("no se puede elegir la contraseña actual -> 400", st == 400 and "reutilizar" in detalle(b), (st, b))
+st, b = pedir("POST", "/api/auth/restablecer", {"email": email_cliente, "codigo": codigo_rec, "password": "Segunda2026"})
+comprobar("con el código, la contraseña nueva se guarda -> 200 (el intento rechazado no gastó el código)", st == 200, (st, b))
+st, b = pedir("GET", "/api/pedidos", token=CLIENTE)
+comprobar("cambiar la contraseña cierra las sesiones abiertas -> 401", st == 401, (st, b))
+st, b = pedir("POST", "/api/auth/restablecer", {"email": email_cliente, "codigo": codigo_rec, "password": "Tercera2026"})
+comprobar("el código de recuperación no sirve dos veces -> 400", st == 400, (st, b))
+st, _ = pedir("POST", "/api/auth/login", {"email": email_cliente, "password": "Prueba2026"})
+st2, b = pedir("POST", "/api/auth/login", {"email": email_cliente, "password": "Segunda2026"})
+comprobar("la contraseña vieja ya no entra y la nueva sí", st == 401 and st2 == 200, (st, st2))
+CLIENTE = b.get("access_token")
+comprobar("llega un correo avisando del cambio de contraseña", "cambió" in ultimo_asunto(email_cliente), ultimo_asunto(email_cliente))
+st, b = pedir("PUT", f"/api/usuarios/{cliente_id}", {"password": "Prueba2026"}, token=CLIENTE)
+comprobar("tampoco se puede volver a una contraseña anterior desde el perfil -> 400", st == 400 and "reutilizar" in detalle(b), (st, b))
+st, eventos = pedir("GET", "/api/eventos?limite=50", token=ADMIN)
+comprobar("evento CLAVE_RESTABLECIDA", any(e["tipo"] == "CLAVE_RESTABLECIDA" for e in eventos), [e["tipo"] for e in eventos])
 
 print("== Límite de intentos en el gateway (va al final: agota el cupo de esta IP durante un minuto)")
 probando_limite = True

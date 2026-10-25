@@ -169,7 +169,7 @@ function alEnviar(form, accion) {
 
 // ───────────── Sesión ─────────────
 
-const FORMULARIOS_ACCESO = ['login', 'registro', 'verificar'];
+const FORMULARIOS_ACCESO = ['login', 'registro', 'verificar', 'recuperar', 'restablecer'];
 
 function mostrarAcceso(formulario) {
   document.querySelectorAll('.acceso-pestana').forEach((b) => b.classList.toggle('activa', b.dataset.acceso === formulario));
@@ -256,6 +256,27 @@ alEnviar($('#form-registro'), async (datos) => {
 alEnviar($('#form-verificar'), async (datos) => {
   iniciarSesion(await api('/api/auth/verificar-correo', { metodo: 'POST', cuerpo: datos }));
   $('#form-verificar').reset();
+});
+
+// Recuperar la contraseña: primero se pide el código, luego se elige la contraseña nueva
+alEnviar($('#form-recuperar'), async (datos) => {
+  const respuesta = await api('/api/auth/recuperar', { metodo: 'POST', cuerpo: datos });
+  const form = $('#form-restablecer');
+  form.reset();
+  form.elements.email.value = datos.email;
+  $('#restablecer-email').textContent = datos.email;
+  mostrarAcceso('restablecer');
+  form.elements.codigo.focus();
+  avisar(respuesta.mensaje);
+});
+
+alEnviar($('#form-restablecer'), async (datos) => {
+  const respuesta = await api('/api/auth/restablecer', { metodo: 'POST', cuerpo: datos });
+  $('#form-restablecer').reset();
+  mostrarAcceso('login');
+  $('#form-login [name="email"]').value = datos.email;
+  $('#form-login [name="password"]').focus();
+  avisar(respuesta.mensaje);
 });
 
 $('#reenviar-codigo').addEventListener('click', async () => {

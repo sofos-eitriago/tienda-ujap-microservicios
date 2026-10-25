@@ -32,6 +32,9 @@
         <label>Email <input name="email" type="email" required autocomplete="username"></label>
         <label>Contraseña <input name="password" type="password" required autocomplete="current-password"></label>
         <button type="submit">Entrar</button>
+        <div class="enlaces-acceso">
+          <button type="button" class="enlace" data-ir="recuperar">¿Olvidaste tu contraseña?</button>
+        </div>
         <div class="demo">
           <strong>Cuentas de prueba</strong>
           <button type="button" class="demo-cuenta" data-email="admin@tienda.com">Administrador · admin@tienda.com</button>
@@ -59,6 +62,31 @@
         <button type="submit">Confirmar y entrar</button>
         <div class="enlaces-acceso">
           <button type="button" class="enlace" id="reenviar-codigo">Reenviar el código</button>
+          <button type="button" class="enlace" data-ir="login">Volver</button>
+        </div>
+        <p class="nota nota-correo">En este entorno los correos no salen a Internet: llegan al buzón de pruebas
+          <a class="enlace-buzon" target="_blank" rel="noopener">Mailpit</a>.</p>
+      </form>
+
+      <form class="formulario" id="form-recuperar" hidden>
+        <h2>Recuperar la contraseña</h2>
+        <p class="nota">Te enviaremos un código para que elijas una contraseña nueva.</p>
+        <label>Email <input name="email" type="email" required autocomplete="username"></label>
+        <button type="submit">Enviar código</button>
+        <div class="enlaces-acceso">
+          <button type="button" class="enlace" data-ir="login">Volver</button>
+        </div>
+      </form>
+
+      <form class="formulario" id="form-restablecer" hidden>
+        <h2>Elige una contraseña nueva</h2>
+        <p class="nota">Escribe el código que enviamos a <strong id="restablecer-email"></strong>. Al cambiarla se cierran todas tus sesiones abiertas.</p>
+        <input type="hidden" name="email">
+        <label>Código <input name="codigo" required inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" class="campo-codigo"></label>
+        <label>Contraseña nueva <input name="password" type="password" required minlength="8" maxlength="72" autocomplete="new-password" placeholder="Mínimo 8 caracteres; no puede ser una de las últimas"></label>
+        <button type="submit">Cambiar contraseña</button>
+        <div class="enlaces-acceso">
+          <button type="button" class="enlace" data-ir="recuperar">Pedir otro código</button>
           <button type="button" class="enlace" data-ir="login">Volver</button>
         </div>
         <p class="nota nota-correo">En este entorno los correos no salen a Internet: llegan al buzón de pruebas

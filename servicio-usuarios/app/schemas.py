@@ -48,6 +48,13 @@ class PedirCodigo(BaseModel):
     email: EmailStr
 
 
+class Restablecer(BaseModel):
+    """Nueva contraseña, con el código que llegó al pedir recuperarla."""
+    email: EmailStr
+    codigo: str = Codigo
+    password: str = Password
+
+
 class Mensaje(BaseModel):
     mensaje: str
 
