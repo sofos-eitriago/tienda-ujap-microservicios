@@ -251,7 +251,7 @@ Los datos se conservan entre reinicios gracias a los volúmenes.
 |---|---|---|
 | `mailpit` | `axllent/mailpit:v1.27.10` | Recibe todos los correos del sistema y los muestra en http://localhost:8025 |
 
-Mailpit solo se publica en `127.0.0.1`: desde otro equipo no se pueden leer los correos. Para enviar correos de verdad, configura las variables `SMTP_*` (ver [Variables de entorno](#variables-de-entorno)).
+Mailpit solo se publica en `127.0.0.1`: desde otro equipo no se pueden leer los correos. Los guarda en el volumen `correos`, así que no se pierden al reiniciar. **Los correos no llegan a Gmail ni a ningún buzón real**: hay que abrirlos en http://localhost:8025. Para enviar correos de verdad, configura las variables `SMTP_*` (ver [Variables de entorno](#variables-de-entorno)).
 
 ### API Gateway
 
@@ -673,7 +673,7 @@ Resumen. La explicación completa de cada decisión, con las alternativas descar
 - **Solo el gateway publica puertos** (80 y 443). Las bases de datos y los microservicios no son accesibles desde fuera de Docker; el buzón de pruebas solo se publica en `127.0.0.1`.
 - **Dos redes de Docker:** `backend` (bases de datos y microservicios) y `frontend` (gateway, frontend y microservicios). El gateway y el frontend no pueden llegar a las bases de datos.
 - **Healthchecks:** cada microservicio espera a que su base de datos esté `healthy` antes de arrancar (`depends_on: condition: service_healthy`), y además reintenta la conexión.
-- **Volúmenes** `pgdata`, `mongodata` y `certificados`: los datos y el certificado persisten entre reinicios.
+- **Volúmenes** `pgdata`, `mongodata`, `certificados` y `correos`: los datos, el certificado y los correos de Mailpit persisten entre reinicios.
 - **API Gateway:** el frontend solo habla con un origen, así que no hay problemas de CORS ni de puertos distintos. El gateway concentra HTTPS, el límite de intentos y la verificación de la sesión.
 - **JWT con secreto compartido** para saber quién llama y con qué rol, más **revocación inmediata** en el gateway (`auth_request`), que cubre lo que un JWT solo no puede: anular un token antes de que expire.
 - **HTTPS con una CA local restringida:** solo puede firmar `tienda.ujap.test` y `localhost`, y su clave privada se borra, así que confiar en ella no abre ningún riesgo.
