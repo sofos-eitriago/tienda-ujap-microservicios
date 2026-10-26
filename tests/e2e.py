@@ -173,10 +173,21 @@ def dns_disponible() -> bool:
         return False
 
 
-def puerto_abierto(puerto: int) -> bool:
+def puerto_abierto(puerto: int, ip: str = "127.0.0.1") -> bool:
     with socket.socket() as s:
         s.settimeout(1)
-        return s.connect_ex(("127.0.0.1", puerto)) == 0
+        return s.connect_ex((ip, puerto)) == 0
+
+
+def ip_en_la_red() -> str | None:
+    """IP de esta máquina en la red local (no envía nada: solo pregunta qué interfaz usaría)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        try:
+            s.connect(("10.255.255.255", 1))
+            ip = s.getsockname()[0]
+        except OSError:
+            return None
+    return None if ip.startswith("127.") else ip
 
 
 env = leer_env()
@@ -210,6 +221,20 @@ try:  # mismo servidor y misma CA de confianza: si falla, es solo por el nombre
 except ssl.SSLCertVerificationError as e:
     otro_nombre = "rechazado" if "match" in str(e) or "mismatch" in str(e) else str(e)
 comprobar("el certificado no sirve para otro nombre de sitio", otro_nombre == "rechazado", otro_nombre)
+# El buzón se abre por el gateway en http://mailpit.correo (aquí con la cabecera Host, sin depender del archivo hosts)
+buzon = urllib.request.Request(f"http://{host}/api/v1/info", headers={"Host": "mailpit.correo"})
+try:
+    with urllib.request.urlopen(buzon, timeout=10) as r:
+        info_mailpit = json.load(r)
+except (OSError, ValueError) as e:
+    info_mailpit = {"error": str(e)}
+comprobar("http://mailpit.correo abre el buzón de Mailpit a través del gateway", "Version" in info_mailpit, info_mailpit)
+ip_red = ip_en_la_red()
+if ip_red:
+    abiertos = [p for p in (80, 443) if puerto_abierto(p, ip_red)]
+    comprobar(f"el gateway no se ve desde la red local ({ip_red}): solo escucha en esta máquina", not abiertos, f"abiertos: {abiertos}")
+else:
+    print("  --    sin conexión de red: se omite la prueba de que el gateway no se ve desde la red")
 cerrados = [p for p in (8001, 8002, 8003, 8004) if not puerto_abierto(p)]
 comprobar("los microservicios NO publican puertos (8001-8004 cerrados)", len(cerrados) == 4, f"abiertos: {set((8001, 8002, 8003, 8004)) - set(cerrados)}")
 

@@ -75,7 +75,7 @@ Las razones de cada decisión de diseño (y las alternativas descartadas) están
                              │   (SQL)    │                      │  (NoSQL)   │
                              └────────────┘                      └────────────┘
 
-   usuarios y pedidos ── SMTP ──▶ Mailpit (buzón de pruebas, solo en http://localhost:8025)
+   usuarios y pedidos ── SMTP ──▶ Mailpit (buzón de pruebas: http://mailpit.correo)
 ```
 
 Cuatro microservicios, **dos por cada base de datos**:
@@ -112,6 +112,7 @@ Después de las 6 partes se agregaron estas mejoras de seguridad y funcionalidad
 | Recuperar la contraseña por correo e historial de contraseñas | usuarios + frontend |
 | Avisos por correo cuando se crea o cambia un pedido | pedidos |
 | HTTPS con una CA local restringida a `tienda.ujap.test` | gateway |
+| Modo oscuro y buzón de pruebas en `http://mailpit.correo` (gateway solo en tu equipo) | frontend + gateway |
 | Documento de decisiones de diseño ([docs/arquitectura.md](docs/arquitectura.md)) | docs |
 
 ## Contenido del repositorio
@@ -195,8 +196,8 @@ La primera vez tarda varios minutos (se descargan imágenes y se compilan los se
 
 El sistema se abre en **https://tienda.ujap.test**. Hay que preparar el equipo **una sola vez**, con el sistema ya levantado:
 
-- **Windows:** clic derecho en `configurar-dominio.ps1` → *Ejecutar con PowerShell* (pide permiso de administrador). Hace dos cosas: agrega `tienda.ujap.test` al archivo `hosts` (apuntando a tu propia máquina, `127.0.0.1`) y le dice a Windows que confíe en la **CA local** del gateway, para que el navegador muestre el candado sin advertencias. Si el navegador estaba abierto, reinícialo.
-- **Linux / macOS:** `echo "127.0.0.1 tienda.ujap.test" | sudo tee -a /etc/hosts` y, si quieres quitar la advertencia, importa `https://tienda.ujap.test/ca-tienda-ujap.crt` como autoridad de confianza en tu sistema o navegador.
+- **Windows:** clic derecho en `configurar-dominio.ps1` → *Ejecutar con PowerShell* (pide permiso de administrador). Hace dos cosas: agrega `tienda.ujap.test` y `mailpit.correo` al archivo `hosts` (apuntando a tu propia máquina, `127.0.0.1`) y le dice a Windows que confíe en la **CA local** del gateway, para que el navegador muestre el candado sin advertencias. Si el navegador estaba abierto, reinícialo.
+- **Linux / macOS:** `echo "127.0.0.1 tienda.ujap.test mailpit.correo" | sudo tee -a /etc/hosts` y, si quieres quitar la advertencia, importa `https://tienda.ujap.test/ca-tienda-ujap.crt` como autoridad de confianza en tu sistema o navegador.
 
 Esa CA la crea el gateway la primera vez que arranca y **solo puede firmar `tienda.ujap.test` y `localhost`**; además su clave privada se borra al terminar, así que confiar en ella no pone en riesgo ningún otro sitio. Sin importarla el sistema funciona igual: el navegador solo mostrará una advertencia que puedes aceptar.
 
@@ -209,7 +210,7 @@ Todo lo que entra por `http://` se redirige a `https://`. Si los puertos 80 o 44
 | **Aplicación** | https://tienda.ujap.test |
 | Swagger del servicio de usuarios | https://tienda.ujap.test/api/usuarios/docs |
 | Catálogo (JSON, público) | https://tienda.ujap.test/api/productos |
-| Buzón de pruebas (Mailpit): códigos y avisos por correo | http://localhost:8025 (solo desde tu equipo) |
+| Buzón de pruebas (Mailpit): códigos y avisos por correo | http://mailpit.correo (también http://localhost:8025) |
 | Certificado de la CA local | https://tienda.ujap.test/ca-tienda-ujap.crt |
 
 ### Cuentas de demostración
@@ -221,7 +222,7 @@ Se crean al iniciar por primera vez, junto con **28 productos** de ejemplo en 8 
 | Administrador | el de `ADMIN_EMAIL` (por defecto `admin@tienda.com`) | el de `ADMIN_PASSWORD` de tu `.env` |
 | Cliente | `banco.venezela@gmail.com`, `jose.rodriguez@gmail.com`, `ana.gomez@ujap.edu.ve` | `Cliente2026` |
 
-En la pantalla de inicio de sesión, los botones de *Cuentas de prueba* rellenan el formulario (la del administrador solo el email: la contraseña es la de tu `.env`). Estas cuentas ya tienen el correo confirmado. Si creas una cuenta nueva, el código para confirmarla llega al buzón de pruebas: http://localhost:8025.
+En la pantalla de inicio de sesión, los botones de *Cuentas de prueba* rellenan el formulario (la del administrador solo el email: la contraseña es la de tu `.env`). Estas cuentas ya tienen el correo confirmado. Si creas una cuenta nueva, el código para confirmarla llega al buzón de pruebas: http://mailpit.correo.
 
 ### Comandos útiles
 
@@ -249,9 +250,9 @@ Los datos se conservan entre reinicios gracias a los volúmenes.
 
 | Servicio | Imagen | Para qué |
 |---|---|---|
-| `mailpit` | `axllent/mailpit:v1.27.10` | Recibe todos los correos del sistema y los muestra en http://localhost:8025 |
+| `mailpit` | `axllent/mailpit:v1.27.10` | Recibe todos los correos del sistema y los muestra en http://mailpit.correo |
 
-Mailpit solo se publica en `127.0.0.1`: desde otro equipo no se pueden leer los correos. Los guarda en el volumen `correos`, así que no se pierden al reiniciar. **Los correos no llegan a Gmail ni a ningún buzón real**: hay que abrirlos en http://localhost:8025. Para enviar correos de verdad, configura las variables `SMTP_*` (ver [Variables de entorno](#variables-de-entorno)).
+Se abre en **http://mailpit.correo** (el gateway lo atiende con ese nombre) y también en http://localhost:8025, por si el nombre no está en el archivo `hosts`. Como el gateway y el puerto 8025 solo escuchan en tu equipo, desde otro equipo no se pueden leer los correos. Los guarda en el volumen `correos`, así que no se pierden al reiniciar. **Los correos no llegan a Gmail ni a ningún buzón real**: hay que abrirlos en http://mailpit.correo. Para enviar correos de verdad, configura las variables `SMTP_*` (ver [Variables de entorno](#variables-de-entorno)).
 
 ### API Gateway
 
@@ -500,6 +501,7 @@ Interfaz web en **HTML, CSS y JavaScript sin frameworks**, servida por Nginx. So
 - Las acciones que no se pueden deshacer (eliminar o cancelar) piden confirmación con un **cuadro de diálogo propio**: se cierra con *Escape* o haciendo clic fuera, y el foco empieza en la opción segura.
 - Se puede abrir una vista directamente, por ejemplo `https://tienda.ujap.test/#pedidos`.
 - Todo el texto que llega de la API se escapa antes de mostrarlo, para evitar inyección de HTML.
+- **Modo oscuro:** sigue la preferencia del sistema operativo y se puede cambiar con el botón 🌙/☀️ de la cabecera, que recuerda la elección. El tema se aplica antes de pintar la página, para que no haya un destello claro.
 
 ### Pruebas automáticas
 
@@ -560,7 +562,7 @@ curl -s -i https://tienda.ujap.test/api/usuarios -H "Authorization: Bearer <toke
 curl -s -i -X POST https://tienda.ujap.test/api/auth/logout -H "Authorization: Bearer <token>"
 curl -s -i https://tienda.ujap.test/api/auth/yo -H "Authorization: Bearer <token>"
 
-# 5. Crear una cuenta: el código llega a http://localhost:8025; con él se confirma y se recibe el token
+# 5. Crear una cuenta: el código llega a http://mailpit.correo; con él se confirma y se recibe el token
 curl -s -X POST https://tienda.ujap.test/api/auth/registro -H "Content-Type: application/json" \
      -d '{"nombre": "Carlos Mendoza", "email": "carlos.mendoza@gmail.com", "password": "Cliente2026"}'
 curl -s -X POST https://tienda.ujap.test/api/auth/verificar-correo -H "Content-Type: application/json" \
@@ -651,6 +653,7 @@ Las credenciales **no están en el código**: se definen en `.env` (excluido de 
 | `DB_USER`, `DB_PASS`, `DB_NAME` | PostgreSQL | 1, 2 y 5 |
 | `MONGO_USER`, `MONGO_PASS`, `MONGO_DB` | MongoDB | 1, 3 y 4 |
 | `GATEWAY_PORT`, `GATEWAY_PORT_HTTPS` | Puertos del gateway en tu máquina (por defecto `80` y `443`) | 1 |
+| `GATEWAY_IP` | Dónde escucha el gateway: `127.0.0.1` (por defecto, solo tu equipo) o `0.0.0.0` (toda la red; expone también el buzón de pruebas) | 1 |
 | `MAILPIT_PORT` | Puerto del buzón de pruebas, solo en `127.0.0.1` (por defecto `8025`) | 1 |
 | `JWT_SECRET` | Secreto con el que se firman y verifican los tokens (mínimo 32 caracteres) | 2 a 5 |
 | `JWT_EXPIRA_MIN` | Duración de la sesión en minutos (por defecto 60) | 2 |
@@ -670,7 +673,7 @@ python -c "import secrets; print(secrets.token_hex(32))"
 Resumen. La explicación completa de cada decisión, con las alternativas descartadas, está en **[docs/arquitectura.md](docs/arquitectura.md)**.
 
 - **Un contenedor por componente** (9 en total) y un `Dockerfile` por servicio. Java y Go usan compilación en dos etapas: la imagen final solo lleva el JRE o el binario.
-- **Solo el gateway publica puertos** (80 y 443). Las bases de datos y los microservicios no son accesibles desde fuera de Docker; el buzón de pruebas solo se publica en `127.0.0.1`.
+- **Solo el gateway publica puertos** (80 y 443), y **solo en tu equipo** (`127.0.0.1` y `::1`): desde otros equipos de la red no se llega ni a la tienda ni al buzón de pruebas. Las bases de datos y los microservicios no son accesibles desde fuera de Docker.
 - **Dos redes de Docker:** `backend` (bases de datos y microservicios) y `frontend` (gateway, frontend y microservicios). El gateway y el frontend no pueden llegar a las bases de datos.
 - **Healthchecks:** cada microservicio espera a que su base de datos esté `healthy` antes de arrancar (`depends_on: condition: service_healthy`), y además reintenta la conexión.
 - **Volúmenes** `pgdata`, `mongodata`, `certificados` y `correos`: los datos, el certificado y los correos de Mailpit persisten entre reinicios.

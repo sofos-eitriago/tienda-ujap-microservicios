@@ -186,8 +186,8 @@ function pedirCodigo(email) {
   form.elements.codigo.focus();
 }
 
-// Buzón de pruebas Mailpit: solo se publica en esta máquina (puerto 8025)
-document.querySelectorAll('.enlace-buzon').forEach((a) => { a.href = `http://${location.hostname}:8025`; });
+// Buzón de pruebas Mailpit: lo atiende el gateway, solo en esta máquina
+document.querySelectorAll('.enlace-buzon').forEach((a) => { a.href = 'http://mailpit.correo'; });
 
 function iniciarSesion(respuesta) {
   guardarSesion({ token: respuesta.access_token, usuario: respuesta.usuario });

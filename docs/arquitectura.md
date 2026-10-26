@@ -35,7 +35,7 @@ directamente: se comunican por HTTP.
 exponer los servicios ni las bases de datos.
 
 **Decisión.** Nginx recibe todo el tráfico y lo reparte por ruta (`/api/usuarios`, `/api/productos`,
-etc.). Solo el gateway publica puertos (80 y 443). Hay dos redes de Docker: `backend` (bases de datos
+etc.). Solo el gateway publica puertos (80 y 443), y solo en esta máquina (`127.0.0.1` y `::1`). Hay dos redes de Docker: `backend` (bases de datos
 y servicios) y `frontend` (gateway, frontend y servicios), así que el gateway no puede llegar a las
 bases de datos.
 
@@ -215,8 +215,10 @@ CA), no lo ignoran.
 
 **Contexto.** Hay que enviar correos sin depender de una cuenta real durante el desarrollo.
 
-**Decisión.** Mailpit recibe todos los correos y los muestra en `http://localhost:8025`. Se publica
-solo en `127.0.0.1`: otros equipos de la red no pueden leerlos. Con las variables `SMTP_*` los
+**Decisión.** Mailpit recibe todos los correos y los muestra en `http://mailpit.correo`, un nombre que
+atiende el gateway (y también en `http://localhost:8025`). Como el gateway solo escucha en esta máquina,
+otros equipos de la red no pueden leerlos; por eso, abrir el gateway a la red (`GATEWAY_IP=0.0.0.0`)
+expone también el buzón. Guarda los correos en un volumen, así que sobreviven a los reinicios. Con las variables `SMTP_*` los
 mismos servicios envían por un servidor real (por ejemplo, Gmail con contraseña de aplicación).
 
 **Consecuencias.** Las pruebas leen los códigos desde la API de Mailpit, igual que una persona los

@@ -8,9 +8,9 @@
 #  la advertencia del certificado, confiar en la CA local: configurar-dominio.ps1 hace las dos cosas)
 #
 # Las variables ${...} se leen del archivo .env (si no existe, se usan los valores por defecto).
-# Solo el gateway publica un puerto: los microservicios y las bases de datos no son accesibles
-# desde fuera de Docker. Para depurar con puertos directos ver docker-compose.debug.yml.
-# La excepción es el buzón de pruebas Mailpit (http://localhost:8025), solo para esta máquina.
+# Solo el gateway publica puertos, y solo en esta máquina: los microservicios y las bases de datos no
+# son accesibles desde fuera de Docker. Para depurar con puertos directos ver docker-compose.debug.yml.
+# El buzón de pruebas Mailpit se abre en http://mailpit.correo (también en http://localhost:8025).
 
 name: tienda-ujap
 
@@ -161,15 +161,16 @@ services:
     restart: unless-stopped
 
   # ───────────────────────── Correo de pruebas ─────────────────────────
-  mailpit:                          # Recibe todos los correos del sistema y los muestra en http://localhost:8025
+  mailpit:                          # Recibe todos los correos del sistema y los muestra en http://mailpit.correo
     image: axllent/mailpit:v1.27.10
-    # Solo se publica en esta máquina (127.0.0.1): desde otro equipo no se pueden leer los correos
+    # Se abre por el gateway en http://mailpit.correo. También en http://localhost:8025, solo en
+    # esta máquina (127.0.0.1), por si el nombre no está en el archivo hosts; lo usan las pruebas.
     ports: ["127.0.0.1:${MAILPIT_PORT:-8025}:8025"]
     environment:
       MP_DATABASE: /data/mailpit.db     # los correos se guardan en disco: no se pierden al reiniciar
     volumes:
       - correos:/data
-    networks: [backend]
+    networks: [backend, frontend]       # frontend: para que el gateway llegue a él
     healthcheck:
       test: ["CMD", "/mailpit", "readyz"]
       interval: 10s
@@ -185,9 +186,14 @@ services:
 
   gateway:                          # Nginx: único punto de entrada al sistema (HTTPS; HTTP redirige a HTTPS)
     build: ./gateway
+    # Solo escucha en esta máquina (127.0.0.1 y ::1, el "localhost" de IPv4 e IPv6): desde otros
+    # equipos de la red no se llega ni a la tienda ni al buzón de pruebas.
+    # Para abrirla a la red: GATEWAY_IP=0.0.0.0 (también expone Mailpit).
     ports:
-      - "${GATEWAY_PORT:-80}:80"
-      - "${GATEWAY_PORT_HTTPS:-443}:443"
+      - "${GATEWAY_IP:-127.0.0.1}:${GATEWAY_PORT:-80}:80"
+      - "${GATEWAY_IP:-127.0.0.1}:${GATEWAY_PORT_HTTPS:-443}:443"
+      - "[::1]:${GATEWAY_PORT:-80}:80"
+      - "[::1]:${GATEWAY_PORT_HTTPS:-443}:443"
     environment:
       PUERTO_HTTPS: ${GATEWAY_PORT_HTTPS:-443}
     volumes:
