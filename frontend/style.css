@@ -14,6 +14,53 @@
   --actividad: #7b4cc2;
   --radio: 10px;
   --sombra: 0 1px 3px rgba(20, 30, 50, 0.08), 0 4px 14px rgba(20, 30, 50, 0.05);
+  /* Colores que cambian entre el modo claro y el oscuro */
+  --cabecera: #16233b;
+  --campo: #fbfcfe;
+  --suave: #f1f4f9;
+  --boton: #1f4e8c;
+  --boton-hover: #183f72;
+  --peligro-fondo: #c0392b;
+  --peligro-hover: #a42f23;
+  --exito-fondo: #1e8e5a;
+  --borrar-fondo: #fff5f4;
+  --borrar-borde: #f0c9c4;
+  --borrar-hover: #fde8e6;
+  --azul-claro: #e8eefb;
+  --ambar-claro: #fff4e0;
+  --ambar: #9a5b00;
+  --verde-claro: #e3f5ec;
+  --rojo-claro: #fdecea;
+  color-scheme: light;
+}
+
+/* Modo oscuro: lo activa el botón de la cabecera o, si no se eligió, la preferencia del sistema */
+:root[data-tema="oscuro"] {
+  --fondo: #0e1520;
+  --superficie: #172131;
+  --texto: #e4e9f1;
+  --texto-suave: #9aa8bd;
+  --borde: #2a374b;
+  --primario: #7eaef2;
+  --primario-hover: #9cc1f6;
+  --peligro: #f28b7d;
+  --exito: #5fd3a0;
+  --sombra: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.25);
+  --cabecera: #0a101a;
+  --campo: #111a27;
+  --suave: #1f2b3e;
+  --boton: #2c64b4;
+  --boton-hover: #3673c8;
+  --peligro-hover: #d24a3b;
+  --borrar-fondo: #2a1b1d;
+  --borrar-borde: #5c2e2a;
+  --borrar-hover: #3a2225;
+  --azul-claro: #1d2f4d;
+  --ambar-claro: #3a2d12;
+  --ambar: #f2c26b;
+  --verde-claro: #143628;
+  --rojo-claro: #3b1d1d;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -35,7 +82,7 @@ body {
   align-items: center;
   gap: 16px;
   padding: 20px 32px;
-  background: #16233b;
+  background: var(--cabecera);
   color: #fff;
 }
 .marca h1 { margin: 0; font-size: 26px; letter-spacing: 0.3px; }
@@ -87,7 +134,7 @@ h2 .nota { margin: 0 0 0 8px; }
 .formulario input, .formulario select, .formulario textarea {
   display: block; width: 100%; margin-top: 5px;
   padding: 9px 11px; font: inherit; color: var(--texto);
-  border: 1px solid var(--borde); border-radius: 7px; background: #fbfcfe;
+  border: 1px solid var(--borde); border-radius: 7px; background: var(--campo);
 }
 .formulario input:focus, .formulario select:focus, .formulario textarea:focus {
   outline: 2px solid rgba(31, 78, 140, 0.25); border-color: var(--primario);
@@ -96,9 +143,9 @@ h2 .nota { margin: 0 0 0 8px; }
 
 button[type="submit"] {
   width: 100%; margin-top: 4px; padding: 11px; border: 0; border-radius: 7px;
-  background: var(--primario); color: #fff; font: inherit; font-weight: 600; cursor: pointer;
+  background: var(--boton); color: #fff; font: inherit; font-weight: 600; cursor: pointer;
 }
-button[type="submit"]:hover { background: var(--primario-hover); }
+button[type="submit"]:hover { background: var(--boton-hover); }
 button[disabled] { opacity: 0.6; cursor: wait; }
 
 /* ───── Tablas ───── */
@@ -118,19 +165,19 @@ td small { display: block; color: var(--texto-suave); font-size: 12px; margin-to
 .stock-bajo { color: var(--peligro); font-weight: 700; }
 
 .boton-borrar {
-  border: 1px solid #f0c9c4; background: #fff5f4; color: var(--peligro);
+  border: 1px solid var(--borrar-borde); background: var(--borrar-fondo); color: var(--peligro);
   border-radius: 6px; padding: 5px 10px; font-size: 13px; cursor: pointer;
 }
-.boton-borrar:hover { background: #fde8e6; }
+.boton-borrar:hover { background: var(--borrar-hover); }
 .boton-suave {
-  border: 1px solid var(--borde); background: #fff; color: var(--texto-suave);
+  border: 1px solid var(--borde); background: var(--superficie); color: var(--texto-suave);
   border-radius: 6px; padding: 5px 10px; font-size: 13px; cursor: pointer;
 }
-.boton-suave:hover { background: #f1f4f9; color: var(--texto); }
+.boton-suave:hover { background: var(--suave); color: var(--texto); }
 td.acciones button { display: block; width: 100%; white-space: nowrap; }
 td.acciones button + button { margin-top: 6px; }
 
-.selector-estado { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--borde); font: inherit; font-size: 13px; }
+.selector-estado { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--borde); font: inherit; font-size: 13px; background: var(--campo); color: var(--texto); }
 .estado-CANCELADO { color: var(--peligro); }
 .estado-ENTREGADO { color: var(--exito); }
 
@@ -138,7 +185,7 @@ td.acciones button + button { margin-top: 6px; }
 .resumen { display: flex; flex-wrap: wrap; gap: 12px; }
 .cifra {
   min-width: 140px; padding: 14px 18px; border-radius: 9px;
-  background: #f6f8fc; border: 1px solid var(--borde);
+  background: var(--suave); border: 1px solid var(--borde);
 }
 .cifra strong { display: block; font-size: 28px; }
 .cifra span { color: var(--texto-suave); font-size: 13px; }
@@ -174,8 +221,8 @@ td.acciones button + button { margin-top: 6px; }
   pointer-events: none;
 }
 .aviso.visible { opacity: 1; transform: none; }
-.aviso.ok { background: var(--exito); }
-.aviso.error { background: var(--peligro); }
+.aviso.ok { background: var(--exito-fondo); }
+.aviso.error { background: var(--peligro-fondo); }
 
 /* ───── Sesión ───── */
 .sesion { display: flex; align-items: center; gap: 10px; font-size: 14px; }
@@ -184,12 +231,18 @@ td.acciones button + button { margin-top: 6px; }
   background: rgba(255, 255, 255, 0.14); color: #dbe5f5;
 }
 .boton-secundario {
-  border: 1px solid var(--borde); background: #fff; color: var(--texto);
+  border: 1px solid var(--borde); background: var(--superficie); color: var(--texto);
   border-radius: 7px; padding: 8px 14px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
 }
-.boton-secundario:hover { background: #f1f4f9; }
+.boton-secundario:hover { background: var(--suave); }
 .cabecera .boton-secundario { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.35); }
 .cabecera .boton-secundario:hover { background: rgba(255, 255, 255, 0.1); }
+.boton-tema {
+  width: 38px; height: 38px; border-radius: 50%; cursor: pointer; font-size: 17px; line-height: 1;
+  border: 1px solid rgba(255, 255, 255, 0.35); background: transparent; color: #fff;
+}
+.boton-tema:hover { background: rgba(255, 255, 255, 0.1); }
+.cabecera-derecha { display: flex; align-items: center; gap: 14px; }
 
 /* Lo exclusivo del administrador no se muestra a los clientes */
 .rol-cliente .solo-admin { display: none !important; }
@@ -207,12 +260,12 @@ td.acciones button + button { margin-top: 6px; }
 .demo { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--borde); display: grid; gap: 6px; }
 .demo strong { font-size: 12px; color: var(--texto-suave); text-transform: uppercase; letter-spacing: 0.4px; }
 .demo-cuenta {
-  text-align: left; border: 1px dashed var(--borde); background: #f8fafd; border-radius: 7px;
+  text-align: left; border: 1px dashed var(--borde); background: var(--campo); border-radius: 7px;
   padding: 8px 10px; font: inherit; font-size: 13px; color: var(--texto); cursor: pointer;
 }
 .demo-cuenta:hover { border-color: var(--primario); }
 .demo .nota { margin: 4px 0 0; font-size: 12px; }
-.demo code { background: #eef1f6; padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+.demo code { background: var(--suave); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
 .acceso-tarjeta h2 { margin: 0 0 14px; font-size: 18px; }
 .acceso-tarjeta .nota { margin: 0 0 16px; }
 .campo-codigo { font-size: 22px !important; letter-spacing: 8px; text-align: center; font-variant-numeric: tabular-nums; }
@@ -242,13 +295,13 @@ td.acciones button + button { margin-top: 6px; }
 /* ───── Insignias ───── */
 .insignia {
   display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700;
-  background: #eef1f6; color: var(--texto-suave);
+  background: var(--suave); color: var(--texto-suave);
 }
-.insignia.rol-admin { background: #e8eefb; color: var(--primario); }
-.insignia.estado-PENDIENTE { background: #fff4e0; color: #9a5b00; }
-.insignia.estado-ENVIADO { background: #e8eefb; color: var(--primario); }
-.insignia.estado-ENTREGADO { background: #e3f5ec; color: var(--exito); }
-.insignia.estado-CANCELADO, .insignia.estado-RECHAZADO { background: #fdecea; color: var(--peligro); }
+.insignia.rol-admin { background: var(--azul-claro); color: var(--primario); }
+.insignia.estado-PENDIENTE { background: var(--ambar-claro); color: var(--ambar); }
+.insignia.estado-ENVIADO { background: var(--azul-claro); color: var(--primario); }
+.insignia.estado-ENTREGADO { background: var(--verde-claro); color: var(--exito); }
+.insignia.estado-CANCELADO, .insignia.estado-RECHAZADO { background: var(--rojo-claro); color: var(--peligro); }
 
 /* ───── Cuadro de confirmación ───── */
 .modal {
@@ -267,17 +320,17 @@ td.acciones button + button { margin-top: 6px; }
   width: 54px; height: 54px; margin: 0 auto 14px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 28px; font-weight: 700; line-height: 1;
-  background: #e8eefb; color: var(--primario);
+  background: var(--azul-claro); color: var(--primario);
 }
-.modal-peligro .modal-icono { background: #fdecea; color: var(--peligro); }
+.modal-peligro .modal-icono { background: var(--rojo-claro); color: var(--peligro); }
 .modal-caja h3 { margin: 0 0 8px; font-size: 19px; }
 .modal-caja p { margin: 0 0 22px; color: var(--texto-suave); font-size: 15px; line-height: 1.5; }
 .modal-acciones { display: flex; gap: 10px; }
 .modal-acciones button { flex: 1; padding: 11px 14px; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
-.boton-confirmar { border: 0; background: var(--primario); color: #fff; }
-.boton-confirmar:hover { background: var(--primario-hover); }
-.modal-peligro .boton-confirmar { background: var(--peligro); }
-.modal-peligro .boton-confirmar:hover { background: #a42f23; }
+.boton-confirmar { border: 0; background: var(--boton); color: #fff; }
+.boton-confirmar:hover { background: var(--boton-hover); }
+.modal-peligro .boton-confirmar { background: var(--peligro-fondo); }
+.modal-peligro .boton-confirmar:hover { background: var(--peligro-hover); }
 .modal-acciones button:focus-visible { outline: 3px solid rgba(31, 78, 140, 0.35); outline-offset: 2px; }
 .modal-peligro .boton-confirmar:focus-visible { outline-color: rgba(192, 57, 43, 0.4); }
 

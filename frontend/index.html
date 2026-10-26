@@ -5,6 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Tienda UJAP — Microservicios</title>
   <link rel="stylesheet" href="style.css">
+  <script>
+    // El tema se aplica antes de pintar la página (así no hay un destello claro en modo oscuro):
+    // la elección guardada con el botón de la cabecera o, si no hay, la preferencia del sistema.
+    (function () {
+      var guardado = null;
+      try { guardado = localStorage.getItem('tema'); } catch (e) { /* sin almacenamiento disponible */ }
+      var oscuro = guardado ? guardado === 'oscuro' : matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.dataset.tema = oscuro ? 'oscuro' : 'claro';
+    })();
+  </script>
 </head>
 <body>
   <header class="cabecera">
@@ -13,10 +23,13 @@
       <p>Proyecto Final · LPR07304 · 4 microservicios · PostgreSQL + MongoDB</p>
     </div>
     <ul class="estado" id="estado-servicios" aria-label="Estado de los microservicios"></ul>
-    <div class="sesion" id="sesion" hidden>
-      <span id="sesion-nombre"></span>
-      <span class="rol" id="sesion-rol"></span>
-      <button class="boton-secundario" id="cerrar-sesion">Cerrar sesión</button>
+    <div class="cabecera-derecha">
+      <div class="sesion" id="sesion" hidden>
+        <span id="sesion-nombre"></span>
+        <span class="rol" id="sesion-rol"></span>
+        <button class="boton-secundario" id="cerrar-sesion">Cerrar sesión</button>
+      </div>
+      <button type="button" class="boton-tema" id="cambiar-tema"></button>
     </div>
   </header>
 

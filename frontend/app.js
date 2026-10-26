@@ -621,6 +621,35 @@ async function cargarActividad() {
   }
 }
 
+// ───────────── Modo claro / oscuro ─────────────
+// El tema inicial lo pone el script del <head>. El botón lo cambia y recuerda la elección;
+// mientras no se elija nada, la página sigue la preferencia del sistema operativo.
+
+const preferenciaOscura = matchMedia('(prefers-color-scheme: dark)');
+
+function aplicarTema(tema) {
+  document.documentElement.dataset.tema = tema;
+  const boton = $('#cambiar-tema');
+  const oscuro = tema === 'oscuro';
+  boton.textContent = oscuro ? '☀️' : '🌙';
+  boton.title = oscuro ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro';
+  boton.setAttribute('aria-label', boton.title);
+}
+
+$('#cambiar-tema').addEventListener('click', () => {
+  const nuevo = document.documentElement.dataset.tema === 'oscuro' ? 'claro' : 'oscuro';
+  aplicarTema(nuevo);
+  try { localStorage.setItem('tema', nuevo); } catch { /* sin almacenamiento: dura mientras la página esté abierta */ }
+});
+
+preferenciaOscura.addEventListener('change', (evento) => {
+  let guardado = null;
+  try { guardado = localStorage.getItem('tema'); } catch { /* sin almacenamiento disponible */ }
+  if (!guardado) aplicarTema(evento.matches ? 'oscuro' : 'claro');
+});
+
+aplicarTema(document.documentElement.dataset.tema === 'oscuro' ? 'oscuro' : 'claro');
+
 // ───────────── Inicio ─────────────
 
 revisarEstado();
