@@ -62,7 +62,7 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Admin2026!")
 CLIENTE_PASSWORD_DEMO = "Cliente2026"
 
 CLIENTES_INICIALES = [
-    {"nombre": "María Pérez", "email": "maria.perez@gmail.com", "telefono": "0414-1234567", "ciudad": "Valencia"},
+    {"nombre": "María Pérez", "email": "banco.venezela@gmail.com", "telefono": "0414-1234567", "ciudad": "Valencia"},
     {"nombre": "José Rodríguez", "email": "jose.rodriguez@gmail.com", "telefono": "0424-7654321", "ciudad": "Maracay"},
     {"nombre": "Ana Gómez", "email": "ana.gomez@ujap.edu.ve", "telefono": "0412-5558899", "ciudad": "San Diego"},
 ]

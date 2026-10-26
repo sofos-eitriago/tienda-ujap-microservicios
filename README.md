@@ -219,7 +219,7 @@ Se crean al iniciar por primera vez, junto con **28 productos** de ejemplo en 8 
 | Rol | Email | Contraseña |
 |---|---|---|
 | Administrador | el de `ADMIN_EMAIL` (por defecto `admin@tienda.com`) | el de `ADMIN_PASSWORD` de tu `.env` |
-| Cliente | `maria.perez@gmail.com`, `jose.rodriguez@gmail.com`, `ana.gomez@ujap.edu.ve` | `Cliente2026` |
+| Cliente | `banco.venezela@gmail.com`, `jose.rodriguez@gmail.com`, `ana.gomez@ujap.edu.ve` | `Cliente2026` |
 
 En la pantalla de inicio de sesión, los botones de *Cuentas de prueba* rellenan el formulario (la del administrador solo el email: la contraseña es la de tu `.env`). Estas cuentas ya tienen el correo confirmado. Si creas una cuenta nueva, el código para confirmarla llega al buzón de pruebas: http://localhost:8025.
 
@@ -548,7 +548,7 @@ Autenticación (parte 2):
 ```bash
 # 1. Iniciar sesión como cliente de demostración → devuelve el access_token
 curl -s -X POST https://tienda.ujap.test/api/auth/login -H "Content-Type: application/json" \
-     -d '{"email": "maria.perez@gmail.com", "password": "Cliente2026"}'
+     -d '{"email": "banco.venezela@gmail.com", "password": "Cliente2026"}'
 
 # 2. Con ese token: tus datos
 curl -s https://tienda.ujap.test/api/auth/yo -H "Authorization: Bearer <token>"
